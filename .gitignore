@@ -1,0 +1,42 @@
+# Environment and local config
+.env
+.env.*
+!.env.example
+!docker/.env.example
+*.local
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+target/
+.m2/
+
+# Logs
+*.log
+*.pid
+*.job
+logs/
+.backend-admin-restart.log
+
+# Runtime uploads and database data
+uploads/
+data/
+mysql-data/
+mysql-data-*/
+docker/mysql/data/
+docker/**/data/
+
+# Local development/runtime cache
+.codex/
+.local-dev/
+tmp-spreadsheet-build/
+output/
+backup/
+import-preview*.json
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

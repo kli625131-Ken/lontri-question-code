@@ -1,0 +1,24 @@
+spring:
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+
+token:
+  blacklist:
+    use-redis: false
+    key-prefix: "auth:blacklist:"
+
+ops:
+  import:
+    bootstrap-enabled: ${OPS_IMPORT_BOOTSTRAP_ENABLED:true}
+    bootstrap-file: ${OPS_IMPORT_BOOTSTRAP_FILE:}
+    reset-on-bootstrap: ${OPS_IMPORT_RESET_ON_BOOTSTRAP:false}
+    default-remind-after-days: ${OPS_IMPORT_DEFAULT_REMIND_AFTER_DAYS:7}
+  upload:
+    root-path: ${OPS_UPLOAD_ROOT_PATH:/uploads}
+    max-file-size-bytes: ${OPS_UPLOAD_MAX_FILE_SIZE_BYTES:10485760}
+
+management:
+  health:
+    redis:
+      enabled: false

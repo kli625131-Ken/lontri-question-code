@@ -1,0 +1,42 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3307/problem_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${SPRING_DATASOURCE_USERNAME:lontri}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      timeout: 3s
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+
+token:
+  blacklist:
+    use-redis: false
+    key-prefix: "auth:blacklist:"
+
+ops:
+  import:
+    bootstrap-enabled: true
+    bootstrap-file: ../docs/LONTRI项目运维记录.xlsx
+    reset-on-bootstrap: false
+    default-remind-after-days: 7
+  upload:
+    root-path: ./uploads
+    max-file-size-bytes: 10485760
+
+logging:
+  level:
+    com.problem: debug
+
+management:
+  health:
+    redis:
+      enabled: false
