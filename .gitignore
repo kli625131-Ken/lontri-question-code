@@ -35,6 +35,25 @@ output/
 backup/
 import-preview*.json
 
+# Business documents, manual test artifacts, and archives
+docs/yunwei/
+20260605已完成.txt
+*.xls
+*.xlsx
+*.doc
+*.docx
+*.ppt
+*.pptx
+*.pdf
+*.zip
+*.rar
+*.7z
+*.bak
+*.backup
+reports/
+exports/
+screenshots/
+
 # IDE / OS
 .idea/
 .vscode/
