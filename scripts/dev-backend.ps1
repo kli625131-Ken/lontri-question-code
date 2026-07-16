@@ -11,6 +11,30 @@ $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $BackendDir = Join-Path $Root "backend"
+$EnvFile = Join-Path $Root ".env"
+
+if (Test-Path $EnvFile) {
+  Get-Content $EnvFile | ForEach-Object {
+    $Line = $_.Trim()
+    if (-not $Line -or $Line.StartsWith("#") -or -not $Line.Contains("=")) {
+      return
+    }
+    $Parts = $Line.Split("=", 2)
+    $Name = $Parts[0].Trim()
+    $Value = $Parts[1].Trim()
+    if ($Name -and -not [Environment]::GetEnvironmentVariable($Name, "Process")) {
+      [Environment]::SetEnvironmentVariable($Name, $Value, "Process")
+    }
+  }
+}
+
+if (-not $Password) {
+  $Password = $env:MYSQL_PASSWORD
+}
+
+if (-not $Password) {
+  $Password = "change_me_app_password"
+}
 
 $env:SPRING_PROFILES_ACTIVE = "dev"
 $env:SERVER_PORT = "$BackendPort"

@@ -4,12 +4,15 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.problem.dto.KnowledgeUpdateDTO;
 import com.problem.entity.OpsIssue;
 import com.problem.entity.OpsKnowledge;
+import com.problem.entity.OpsMaintenanceFinding;
+import com.problem.entity.OpsMaintenanceVisit;
 import com.problem.entity.Project;
 import com.problem.entity.User;
 import com.problem.mapper.OpsIssueMapper;
 import com.problem.mapper.OpsKnowledgeMapper;
 import com.problem.mapper.ProjectMapper;
 import com.problem.support.CurrentUserAccessService;
+import com.problem.vo.KnowledgeImportReportVO;
 import com.problem.vo.KnowledgeVO;
 import com.problem.vo.PageResultVO;
 import lombok.RequiredArgsConstructor;
@@ -44,9 +47,15 @@ import java.util.stream.Collectors;
 public class KnowledgeService {
 
     public static final String STATUS_PUBLISHED = "PUBLISHED";
+    public static final String STATUS_DRAFT = "DRAFT";
+    public static final String STATUS_NEEDS_REVIEW = "NEEDS_REVIEW";
     public static final String STATUS_DISABLED = "DISABLED";
+    public static final String QUALITY_READY = "READY";
+    public static final String QUALITY_NEEDS_REVIEW = "NEEDS_REVIEW";
     public static final String SOURCE_ISSUE_LEDGER = "ISSUE_LEDGER";
     public static final String SOURCE_COMPANY_EXCEL = "COMPANY_EXCEL";
+    public static final String SOURCE_OPERATIONS = "OPERATIONS";
+    public static final String REF_MAINTENANCE_FINDING = "MAINTENANCE_FINDING";
 
     private final OpsKnowledgeMapper opsKnowledgeMapper;
     private final OpsIssueMapper opsIssueMapper;
@@ -73,9 +82,12 @@ public class KnowledgeService {
             wrapper.eq(OpsKnowledge::getSourceType, sourceType.trim().toUpperCase(Locale.ROOT));
         }
         if (StringUtils.hasText(status)) {
-            wrapper.eq(OpsKnowledge::getStatus, normalizeStatus(status));
+            String normalizedStatus = normalizeStatus(status);
+            if (!"ALL".equals(normalizedStatus)) {
+                wrapper.eq(OpsKnowledge::getStatus, normalizedStatus);
+            }
         } else {
-            wrapper.eq(OpsKnowledge::getStatus, STATUS_PUBLISHED);
+            wrapper.ne(OpsKnowledge::getStatus, STATUS_DISABLED);
         }
         if (StringUtils.hasText(faultCode)) {
             wrapper.eq(OpsKnowledge::getFaultCode, faultCode.trim().toUpperCase(Locale.ROOT));
@@ -150,12 +162,16 @@ public class KnowledgeService {
             knowledge = new OpsKnowledge();
             knowledge.setIssueId(issue.getId());
             knowledge.setProjectId(issue.getProjectId());
+            knowledge.setSourceRefType("ISSUE");
+            knowledge.setSourceRefId(issue.getId());
             knowledge.setCreatedBy(user.getId());
             knowledge.setCreateTime(now);
             knowledge.setDeleted(0);
         }
         knowledge.setProjectId(issue.getProjectId());
         knowledge.setSourceType(SOURCE_ISSUE_LEDGER);
+        knowledge.setSourceRefType("ISSUE");
+        knowledge.setSourceRefId(issue.getId());
         knowledge.setSourceName("日常客户反馈问题台账");
         knowledge.setSourceSheet(null);
         knowledge.setSourceRowNumber(null);
@@ -167,6 +183,7 @@ public class KnowledgeService {
         knowledge.setPreventionSummary(defaultIfBlank(issue.getPreventiveAction(), issue.getFollowUpAction()));
         knowledge.setTags(trimToNull(issue.getReuseTags()));
         knowledge.setStatus(STATUS_PUBLISHED);
+        applyQuality(knowledge);
         knowledge.setUpdatedBy(user.getId());
         knowledge.setUpdateTime(now);
         if (knowledge.getId() == null) {
@@ -175,6 +192,55 @@ public class KnowledgeService {
             opsKnowledgeMapper.updateById(knowledge);
         }
         return knowledge;
+    }
+
+    @Transactional
+    public KnowledgeVO syncFromMaintenanceFinding(OpsMaintenanceVisit visit, OpsMaintenanceFinding finding) {
+        if (visit == null || finding == null || finding.getId() == null) {
+            throw new IllegalArgumentException("运维记录不存在");
+        }
+        currentUserAccessService.assertProjectAccess(visit.getProjectId());
+        OpsKnowledge knowledge = findBySourceRef(REF_MAINTENANCE_FINDING, finding.getId());
+        User user = currentUserAccessService.getCurrentUser();
+        LocalDateTime now = LocalDateTime.now();
+        if (knowledge == null) {
+            knowledge = new OpsKnowledge();
+            knowledge.setIssueId(null);
+            knowledge.setCreatedBy(user.getId());
+            knowledge.setCreateTime(now);
+            knowledge.setDeleted(0);
+        }
+        knowledge.setProjectId(visit.getProjectId());
+        knowledge.setSourceType(SOURCE_OPERATIONS);
+        knowledge.setSourceRefType(REF_MAINTENANCE_FINDING);
+        knowledge.setSourceRefId(finding.getId());
+        knowledge.setSourceName(defaultIfBlank(visit.getVisitTitle(), "运维现场记录"));
+        knowledge.setSourceSheet(defaultIfBlank(visit.getServicePeriod(), visit.getVisitNo()));
+        knowledge.setSourceRowNumber(null);
+        knowledge.setTitle(limit(defaultIfBlank(finding.getIssueDescription(), defaultIfBlank(visit.getVisitTitle(), "运维现场问题")), 255));
+        knowledge.setFaultCode(inferFaultCode(compactJoin(" ",
+            finding.getFloorName(),
+            finding.getAreaName(),
+            finding.getIssueDescription(),
+            finding.getCauseAnalysis(),
+            finding.getHandlingResult(),
+            finding.getFollowUpAction()
+        )));
+        knowledge.setSymptomSummary(trimToNull(compactJoin("；", finding.getFloorName(), finding.getAreaName(), finding.getIssueDescription())));
+        knowledge.setCauseSummary(trimToNull(finding.getCauseAnalysis()));
+        knowledge.setSolutionSummary(trimToNull(finding.getHandlingResult()));
+        knowledge.setPreventionSummary(trimToNull(finding.getFollowUpAction()));
+        knowledge.setTags(limit(compactTags("运维", visit.getServicePeriod(), finding.getFloorName(), finding.getAreaName(), visit.getVisitTitle()), 500));
+        knowledge.setStatus(STATUS_PUBLISHED);
+        applyQuality(knowledge);
+        knowledge.setUpdatedBy(user.getId());
+        knowledge.setUpdateTime(now);
+        if (knowledge.getId() == null) {
+            opsKnowledgeMapper.insert(knowledge);
+        } else {
+            opsKnowledgeMapper.updateById(knowledge);
+        }
+        return toVO(knowledge, null, projectMapper.selectById(visit.getProjectId()));
     }
 
     @Transactional
@@ -193,17 +259,25 @@ public class KnowledgeService {
     }
 
     @Transactional
-    public int importCompanyExcel(MultipartFile file) {
+    public KnowledgeImportReportVO importCompanyExcel(MultipartFile file) {
         currentUserAccessService.assertNotTemporary("import knowledge document");
         validateExcelFile(file);
         User user = currentUserAccessService.getCurrentUser();
         LocalDateTime now = LocalDateTime.now();
         String sourceName = defaultIfBlank(file.getOriginalFilename(), "公司问题经验库");
         int imported = 0;
+        int inserted = 0;
+        int updated = 0;
+        int skipped = 0;
+        int totalRows = 0;
+        int sheetCount = 0;
+        int reviewRows = 0;
+        List<KnowledgeImportReportVO.RowMessage> messages = new ArrayList<>();
 
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
             DataFormatter formatter = new DataFormatter();
             for (Sheet sheet : workbook) {
+                sheetCount++;
                 ImportedSheet importedSheet;
                 try {
                     importedSheet = readSheet(sheet, formatter);
@@ -211,22 +285,35 @@ public class KnowledgeService {
                     throw importFailure(sourceName, sheet.getSheetName(), null, "读取工作表失败", e);
                 }
                 if (importedSheet.headers().isEmpty()) {
+                    messages.add(importMessage("WARN", sheet.getSheetName(), null, "\u672a\u8bc6\u522b\u5230\u8868\u5934\uff0c\u5df2\u8df3\u8fc7\u8be5\u5de5\u4f5c\u8868"));
                     continue;
                 }
+                totalRows += importedSheet.rows().size();
                 for (ImportedRow row : importedSheet.rows()) {
                     try {
                         OpsKnowledge knowledge = buildKnowledgeFromRow(row, sourceName, user.getId(), now);
                         if (knowledge == null) {
+                            skipped++;
+                            messages.add(importMessage("WARN", row.sheetName(), row.rowNumber(), "\u6709\u6548\u5185\u5bb9\u4e0d\u8db3\uff0c\u672a\u5165\u5e93"));
                             continue;
                         }
                         OpsKnowledge existing = findByDocumentRow(sourceName, row.sheetName(), row.rowNumber());
                         if (existing == null) {
                             opsKnowledgeMapper.insert(knowledge);
+                            inserted++;
                         } else {
                             knowledge.setId(existing.getId());
                             knowledge.setCreatedBy(existing.getCreatedBy());
                             knowledge.setCreateTime(existing.getCreateTime());
+                            if (STATUS_PUBLISHED.equals(existing.getStatus()) || STATUS_DISABLED.equals(existing.getStatus())) {
+                                knowledge.setStatus(existing.getStatus());
+                            }
                             opsKnowledgeMapper.updateById(knowledge);
+                            updated++;
+                        }
+                        if (QUALITY_NEEDS_REVIEW.equals(knowledge.getQualityStatus())) {
+                            reviewRows++;
+                            messages.add(importMessage("REVIEW", row.sheetName(), row.rowNumber(), knowledge.getQualityIssues()));
                         }
                         imported++;
                     } catch (IllegalArgumentException e) {
@@ -251,7 +338,17 @@ public class KnowledgeService {
             throw new IllegalArgumentException("知识库导入失败：文件 " + sourceName + " 处理失败：" + rootCauseMessage(e), e);
         }
 
-        return imported;
+        return KnowledgeImportReportVO.builder()
+            .fileName(sourceName)
+            .sheetCount(sheetCount)
+            .totalRows(totalRows)
+            .insertedRows(inserted)
+            .updatedRows(updated)
+            .skippedRows(skipped)
+            .importedRows(imported)
+            .reviewRows(reviewRows)
+            .messages(messages)
+            .build();
     }
 
     @Transactional
@@ -281,6 +378,10 @@ public class KnowledgeService {
         if (dto.getTags() != null) {
             knowledge.setTags(trimToNull(dto.getTags()));
         }
+        if (dto.getStatus() != null) {
+            knowledge.setStatus(normalizeStatus(dto.getStatus()));
+        }
+        applyQuality(knowledge);
         knowledge.setUpdatedBy(user.getId());
         knowledge.setUpdateTime(LocalDateTime.now());
         opsKnowledgeMapper.updateById(knowledge);
@@ -316,6 +417,7 @@ public class KnowledgeService {
         assertKnowledgeAccess(knowledge);
         User user = currentUserAccessService.getCurrentUser();
         knowledge.setStatus(status);
+        applyQuality(knowledge);
         knowledge.setUpdatedBy(user.getId());
         knowledge.setUpdateTime(LocalDateTime.now());
         opsKnowledgeMapper.updateById(knowledge);
@@ -361,6 +463,14 @@ public class KnowledgeService {
             .eq(OpsKnowledge::getSourceName, sourceName)
             .eq(OpsKnowledge::getSourceSheet, sheetName)
             .eq(OpsKnowledge::getSourceRowNumber, rowNumber)
+            .last("LIMIT 1"));
+    }
+
+    private OpsKnowledge findBySourceRef(String sourceRefType, Long sourceRefId) {
+        return opsKnowledgeMapper.selectOne(new LambdaQueryWrapper<OpsKnowledge>()
+            .eq(OpsKnowledge::getSourceType, SOURCE_OPERATIONS)
+            .eq(OpsKnowledge::getSourceRefType, sourceRefType)
+            .eq(OpsKnowledge::getSourceRefId, sourceRefId)
             .last("LIMIT 1"));
     }
 
@@ -461,6 +571,8 @@ public class KnowledgeService {
         knowledge.setIssueId(null);
         knowledge.setProjectId(null);
         knowledge.setSourceType(SOURCE_COMPANY_EXCEL);
+        knowledge.setSourceRefType("DOCUMENT_ROW");
+        knowledge.setSourceRefId(null);
         knowledge.setSourceName(sourceName);
         knowledge.setSourceSheet(row.sheetName());
         knowledge.setSourceRowNumber(row.rowNumber());
@@ -471,7 +583,11 @@ public class KnowledgeService {
         knowledge.setSolutionSummary(trimToNull(solution));
         knowledge.setPreventionSummary(trimToNull(prevention));
         knowledge.setTags(limit(compactTags(row.sheetName(), category, project, sourceName), 500));
-        knowledge.setStatus(STATUS_PUBLISHED);
+        knowledge.setStatus(STATUS_DRAFT);
+        applyQuality(knowledge);
+        if (QUALITY_NEEDS_REVIEW.equals(knowledge.getQualityStatus())) {
+            knowledge.setStatus(STATUS_NEEDS_REVIEW);
+        }
         knowledge.setCreatedBy(userId);
         knowledge.setUpdatedBy(userId);
         knowledge.setCreateTime(now);
@@ -488,6 +604,53 @@ public class KnowledgeService {
             return true;
         }
         return compactJoin("", symptom, cause, prevention).length() >= 20;
+    }
+
+    private void applyQuality(OpsKnowledge knowledge) {
+        QualityResult quality = evaluateQuality(knowledge);
+        knowledge.setQualityScore(quality.score());
+        knowledge.setQualityStatus(quality.score() >= 80 ? QUALITY_READY : QUALITY_NEEDS_REVIEW);
+        knowledge.setQualityIssues(limit(String.join(",", quality.issues()), 500));
+    }
+
+    private QualityResult evaluateQuality(OpsKnowledge knowledge) {
+        int score = 0;
+        List<String> issues = new ArrayList<>();
+        if (StringUtils.hasText(knowledge.getTitle())) {
+            score += 20;
+        } else {
+            issues.add("\u7f3a\u6807\u9898");
+        }
+        if (StringUtils.hasText(knowledge.getSymptomSummary())) {
+            score += 20;
+        } else {
+            issues.add("\u7f3a\u95ee\u9898\u73b0\u8c61");
+        }
+        if (StringUtils.hasText(knowledge.getCauseSummary())) {
+            score += 20;
+        } else {
+            issues.add("\u7f3a\u539f\u56e0\u5206\u6790");
+        }
+        if (StringUtils.hasText(knowledge.getSolutionSummary())) {
+            score += 30;
+        } else {
+            issues.add("\u7f3a\u5904\u7406\u65b9\u6848");
+        }
+        if (StringUtils.hasText(knowledge.getTags()) || StringUtils.hasText(knowledge.getFaultCode())) {
+            score += 10;
+        } else {
+            issues.add("\u7f3a\u6807\u7b7e\u6216\u6545\u969c\u4ee3\u7801");
+        }
+        return new QualityResult(score, issues);
+    }
+
+    private KnowledgeImportReportVO.RowMessage importMessage(String level, String sheetName, Integer rowNumber, String message) {
+        return KnowledgeImportReportVO.RowMessage.builder()
+            .level(level)
+            .sheetName(sheetName)
+            .rowNumber(rowNumber)
+            .message(message)
+            .build();
     }
 
     private IllegalArgumentException importFailure(String sourceName, String sheetName, Integer rowNumber, String stage, Throwable cause) {
@@ -586,7 +749,11 @@ public class KnowledgeService {
 
     private String normalizeStatus(String status) {
         String value = status.trim().toUpperCase(Locale.ROOT);
-        return STATUS_DISABLED.equals(value) ? STATUS_DISABLED : STATUS_PUBLISHED;
+        return switch (value) {
+            case "ALL" -> "ALL";
+            case STATUS_DRAFT, STATUS_PUBLISHED, STATUS_NEEDS_REVIEW, STATUS_DISABLED -> value;
+            default -> STATUS_PUBLISHED;
+        };
     }
 
     private Map<Long, OpsIssue> loadIssueMap(Set<Long> issueIds) {
@@ -623,6 +790,8 @@ public class KnowledgeService {
             .issueNo(issue == null ? null : issue.getIssueNo())
             .projectId(knowledge.getProjectId())
             .sourceType(knowledge.getSourceType())
+            .sourceRefType(knowledge.getSourceRefType())
+            .sourceRefId(knowledge.getSourceRefId())
             .sourceName(knowledge.getSourceName())
             .sourceSheet(knowledge.getSourceSheet())
             .sourceRowNumber(knowledge.getSourceRowNumber())
@@ -638,6 +807,9 @@ public class KnowledgeService {
             .preventionSummary(knowledge.getPreventionSummary())
             .tags(knowledge.getTags())
             .status(knowledge.getStatus())
+            .qualityScore(knowledge.getQualityScore())
+            .qualityStatus(knowledge.getQualityStatus())
+            .qualityIssues(knowledge.getQualityIssues())
             .createTime(knowledge.getCreateTime())
             .updateTime(knowledge.getUpdateTime())
             .build();
@@ -691,5 +863,8 @@ public class KnowledgeService {
     }
 
     private record ImportedRow(String sheetName, Integer rowNumber, Map<String, String> data) {
+    }
+
+    private record QualityResult(int score, List<String> issues) {
     }
 }

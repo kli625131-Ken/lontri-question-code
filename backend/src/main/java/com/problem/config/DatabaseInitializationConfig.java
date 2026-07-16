@@ -315,11 +315,194 @@ public class DatabaseInitializationConfig {
         executeSafely("ALTER TABLE ops_project_warranty ADD COLUMN file_size BIGINT");
         executeSafely("ALTER TABLE ops_project_warranty ADD COLUMN file_path VARCHAR(500)");
         jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS ops_maintenance_visit (
+                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                project_id BIGINT NOT NULL,
+                visit_no VARCHAR(64),
+                visit_title VARCHAR(255),
+                service_period VARCHAR(100),
+                service_year INT,
+                service_quarter INT,
+                planned_start_at DATETIME NULL,
+                planned_end_at DATETIME NULL,
+                actual_start_at DATETIME NULL,
+                actual_end_at DATETIME NULL,
+                status VARCHAR(32) DEFAULT 'PLANNED',
+                summary TEXT,
+                conclusion TEXT,
+                source_file_path VARCHAR(1000),
+                source_sheet VARCHAR(100),
+                source_row_number INT,
+                source_hash VARCHAR(128),
+                created_by BIGINT NULL,
+                updated_by BIGINT NULL,
+                create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                deleted TINYINT DEFAULT 0,
+                KEY idx_maintenance_visit_project (project_id),
+                KEY idx_maintenance_visit_status (status),
+                KEY idx_maintenance_visit_period (service_year, service_quarter),
+                KEY idx_maintenance_visit_source_hash (source_hash)
+            )
+            """);
+        executeSafely("ALTER TABLE ops_maintenance_visit ADD COLUMN source_file_path VARCHAR(1000)");
+        executeSafely("ALTER TABLE ops_maintenance_visit ADD COLUMN source_sheet VARCHAR(100)");
+        executeSafely("ALTER TABLE ops_maintenance_visit ADD COLUMN source_row_number INT");
+        executeSafely("ALTER TABLE ops_maintenance_visit ADD COLUMN source_hash VARCHAR(128)");
+        executeSafely("ALTER TABLE ops_maintenance_visit ADD INDEX idx_maintenance_visit_source_hash (source_hash)");
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS ops_maintenance_assignment (
+                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                visit_id BIGINT NOT NULL,
+                scheduled_at DATETIME NULL,
+                floor_name VARCHAR(100),
+                task_item VARCHAR(500),
+                owner_name VARCHAR(100),
+                status VARCHAR(32) DEFAULT 'PENDING',
+                notes VARCHAR(500),
+                source_file_path VARCHAR(1000),
+                source_sheet VARCHAR(100),
+                source_row_number INT,
+                source_hash VARCHAR(128),
+                create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                deleted TINYINT DEFAULT 0,
+                KEY idx_maintenance_assignment_visit (visit_id, scheduled_at),
+                KEY idx_maintenance_assignment_source_hash (source_hash)
+            )
+            """);
+        executeSafely("ALTER TABLE ops_maintenance_assignment ADD COLUMN source_file_path VARCHAR(1000)");
+        executeSafely("ALTER TABLE ops_maintenance_assignment ADD COLUMN source_sheet VARCHAR(100)");
+        executeSafely("ALTER TABLE ops_maintenance_assignment ADD COLUMN source_row_number INT");
+        executeSafely("ALTER TABLE ops_maintenance_assignment ADD COLUMN source_hash VARCHAR(128)");
+        executeSafely("ALTER TABLE ops_maintenance_assignment ADD INDEX idx_maintenance_assignment_source_hash (source_hash)");
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS ops_maintenance_personnel (
+                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                visit_id BIGINT NOT NULL,
+                person_name VARCHAR(100),
+                phone VARCHAR(50),
+                role_name VARCHAR(100),
+                notes VARCHAR(500),
+                source_file_path VARCHAR(1000),
+                source_sheet VARCHAR(100),
+                source_row_number INT,
+                source_hash VARCHAR(128),
+                create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                deleted TINYINT DEFAULT 0,
+                KEY idx_maintenance_personnel_visit (visit_id),
+                KEY idx_maintenance_personnel_source_hash (source_hash)
+            )
+            """);
+        executeSafely("ALTER TABLE ops_maintenance_personnel ADD COLUMN source_file_path VARCHAR(1000)");
+        executeSafely("ALTER TABLE ops_maintenance_personnel ADD COLUMN source_sheet VARCHAR(100)");
+        executeSafely("ALTER TABLE ops_maintenance_personnel ADD COLUMN source_row_number INT");
+        executeSafely("ALTER TABLE ops_maintenance_personnel ADD COLUMN source_hash VARCHAR(128)");
+        executeSafely("ALTER TABLE ops_maintenance_personnel ADD INDEX idx_maintenance_personnel_source_hash (source_hash)");
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS ops_maintenance_finding (
+                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                visit_id BIGINT NOT NULL,
+                floor_name VARCHAR(100),
+                area_name VARCHAR(255),
+                issue_description TEXT,
+                handling_result TEXT,
+                completion_status VARCHAR(100),
+                cause_analysis TEXT,
+                follow_up_action TEXT,
+                quote_required TINYINT DEFAULT 0,
+                knowledge_included TINYINT DEFAULT 1,
+                found_at DATETIME NULL,
+                source_file_path VARCHAR(1000),
+                source_sheet VARCHAR(100),
+                source_row_number INT,
+                source_hash VARCHAR(128),
+                created_by BIGINT NULL,
+                updated_by BIGINT NULL,
+                create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                deleted TINYINT DEFAULT 0,
+                KEY idx_maintenance_finding_visit (visit_id),
+                KEY idx_maintenance_finding_found_at (found_at),
+                KEY idx_maintenance_finding_source_hash (source_hash)
+            )
+            """);
+        executeSafely("ALTER TABLE ops_maintenance_finding ADD COLUMN source_file_path VARCHAR(1000)");
+        executeSafely("ALTER TABLE ops_maintenance_finding ADD COLUMN source_sheet VARCHAR(100)");
+        executeSafely("ALTER TABLE ops_maintenance_finding ADD COLUMN source_row_number INT");
+        executeSafely("ALTER TABLE ops_maintenance_finding ADD COLUMN source_hash VARCHAR(128)");
+        executeSafely("ALTER TABLE ops_maintenance_finding ADD INDEX idx_maintenance_finding_source_hash (source_hash)");
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS ops_maintenance_quote_item (
+                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                visit_id BIGINT NOT NULL,
+                area_name VARCHAR(255),
+                item_name VARCHAR(255),
+                quantity DECIMAL(12, 2) DEFAULT 0,
+                unit_name VARCHAR(50),
+                unit_price DECIMAL(12, 2) DEFAULT 0,
+                amount DECIMAL(12, 2) DEFAULT 0,
+                notes VARCHAR(500),
+                source_file_path VARCHAR(1000),
+                source_sheet VARCHAR(100),
+                source_row_number INT,
+                source_hash VARCHAR(128),
+                create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                deleted TINYINT DEFAULT 0,
+                KEY idx_maintenance_quote_visit (visit_id),
+                KEY idx_maintenance_quote_source_hash (source_hash)
+            )
+            """);
+        executeSafely("ALTER TABLE ops_maintenance_quote_item ADD COLUMN source_file_path VARCHAR(1000)");
+        executeSafely("ALTER TABLE ops_maintenance_quote_item ADD COLUMN source_sheet VARCHAR(100)");
+        executeSafely("ALTER TABLE ops_maintenance_quote_item ADD COLUMN source_row_number INT");
+        executeSafely("ALTER TABLE ops_maintenance_quote_item ADD COLUMN source_hash VARCHAR(128)");
+        executeSafely("ALTER TABLE ops_maintenance_quote_item ADD INDEX idx_maintenance_quote_source_hash (source_hash)");
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS ops_maintenance_attachment (
+                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                finding_id BIGINT NOT NULL,
+                visit_id BIGINT NOT NULL,
+                file_name VARCHAR(255) NOT NULL,
+                file_type VARCHAR(100),
+                file_size BIGINT,
+                file_path VARCHAR(500) NOT NULL,
+                uploaded_by BIGINT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                deleted_flag TINYINT DEFAULT 0,
+                KEY idx_maintenance_attachment_finding (finding_id, created_at),
+                KEY idx_maintenance_attachment_visit (visit_id, created_at)
+            )
+            """);
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS ops_maintenance_source_file (
+                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                visit_id BIGINT NULL,
+                project_name VARCHAR(100),
+                file_type VARCHAR(32),
+                file_name VARCHAR(255),
+                file_path VARCHAR(1000),
+                zip_entry_path VARCHAR(1000),
+                import_status VARCHAR(32) DEFAULT 'IMPORTED',
+                message VARCHAR(1000),
+                source_hash VARCHAR(128),
+                create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                deleted TINYINT DEFAULT 0,
+                KEY idx_maintenance_source_visit (visit_id),
+                KEY idx_maintenance_source_hash (source_hash)
+            )
+            """);
+        jdbcTemplate.execute("""
             CREATE TABLE IF NOT EXISTS ops_knowledge (
                 id BIGINT PRIMARY KEY AUTO_INCREMENT,
                 issue_id BIGINT NULL,
                 project_id BIGINT NULL,
                 source_type VARCHAR(32) DEFAULT 'ISSUE_LEDGER',
+                source_ref_type VARCHAR(32),
+                source_ref_id BIGINT NULL,
                 source_name VARCHAR(255),
                 source_sheet VARCHAR(100),
                 source_row_number INT,
@@ -331,6 +514,9 @@ public class DatabaseInitializationConfig {
                 prevention_summary TEXT,
                 tags VARCHAR(500),
                 status VARCHAR(32) DEFAULT 'PUBLISHED',
+                quality_score INT DEFAULT 0,
+                quality_status VARCHAR(32) DEFAULT 'NEEDS_REVIEW',
+                quality_issues VARCHAR(500),
                 created_by BIGINT NULL,
                 updated_by BIGINT NULL,
                 create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -348,14 +534,21 @@ public class DatabaseInitializationConfig {
         executeSafely("ALTER TABLE ops_knowledge MODIFY COLUMN issue_id BIGINT NULL");
         executeSafely("ALTER TABLE ops_knowledge MODIFY COLUMN project_id BIGINT NULL");
         executeSafely("ALTER TABLE ops_knowledge ADD COLUMN source_type VARCHAR(32) DEFAULT 'ISSUE_LEDGER'");
+        executeSafely("ALTER TABLE ops_knowledge ADD COLUMN source_ref_type VARCHAR(32)");
+        executeSafely("ALTER TABLE ops_knowledge ADD COLUMN source_ref_id BIGINT NULL");
         executeSafely("ALTER TABLE ops_knowledge ADD COLUMN source_name VARCHAR(255)");
         executeSafely("ALTER TABLE ops_knowledge ADD COLUMN source_sheet VARCHAR(100)");
         executeSafely("ALTER TABLE ops_knowledge ADD COLUMN source_row_number INT");
+        executeSafely("ALTER TABLE ops_knowledge ADD COLUMN quality_score INT DEFAULT 0");
+        executeSafely("ALTER TABLE ops_knowledge ADD COLUMN quality_status VARCHAR(32) DEFAULT 'NEEDS_REVIEW'");
+        executeSafely("ALTER TABLE ops_knowledge ADD COLUMN quality_issues VARCHAR(500)");
         executeSafely("ALTER TABLE ops_knowledge ADD INDEX idx_knowledge_project (project_id)");
         executeSafely("ALTER TABLE ops_knowledge ADD INDEX idx_knowledge_fault (fault_code)");
         executeSafely("ALTER TABLE ops_knowledge ADD INDEX idx_knowledge_status (status)");
+        executeSafely("ALTER TABLE ops_knowledge ADD INDEX idx_knowledge_quality_status (quality_status)");
         executeSafely("ALTER TABLE ops_knowledge ADD INDEX idx_knowledge_source (source_type, source_name)");
         executeSafely("ALTER TABLE ops_knowledge ADD INDEX idx_knowledge_source_row (source_type, source_name, source_sheet, source_row_number)");
+        executeSafely("ALTER TABLE ops_knowledge ADD INDEX idx_knowledge_source_ref (source_ref_type, source_ref_id)");
         jdbcTemplate.execute("""
             CREATE TABLE IF NOT EXISTS ops_category_dict (
                 id BIGINT PRIMARY KEY AUTO_INCREMENT,

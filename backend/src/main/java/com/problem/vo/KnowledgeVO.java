@@ -13,6 +13,8 @@ public class KnowledgeVO {
     private String issueNo;
     private Long projectId;
     private String sourceType;
+    private String sourceRefType;
+    private Long sourceRefId;
     private String sourceName;
     private String sourceSheet;
     private Integer sourceRowNumber;
@@ -28,6 +30,9 @@ public class KnowledgeVO {
     private String preventionSummary;
     private String tags;
     private String status;
+    private Integer qualityScore;
+    private String qualityStatus;
+    private String qualityIssues;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }

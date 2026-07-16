@@ -18,6 +18,10 @@
         <el-icon><Calendar /></el-icon>
         <span>项目中心</span>
       </el-menu-item>
+      <el-menu-item index="/maintenance">
+        <el-icon><Tools /></el-icon>
+        <span>运维管理</span>
+      </el-menu-item>
       <el-menu-item index="/knowledge">
         <el-icon><Collection /></el-icon>
         <span>知识库</span>

@@ -11,4 +11,5 @@ public class KnowledgeUpdateDTO {
     private String solutionSummary;
     private String preventionSummary;
     private String tags;
+    private String status;
 }

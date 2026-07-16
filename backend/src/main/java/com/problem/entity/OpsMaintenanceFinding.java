@@ -9,30 +9,26 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("ops_knowledge")
-public class OpsKnowledge {
+@TableName("ops_maintenance_finding")
+public class OpsMaintenanceFinding {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long issueId;
-    private Long projectId;
-    private String sourceType;
-    private String sourceRefType;
-    private Long sourceRefId;
-    private String sourceName;
+    private Long visitId;
+    private String floorName;
+    private String areaName;
+    private String issueDescription;
+    private String handlingResult;
+    private String completionStatus;
+    private String causeAnalysis;
+    private String followUpAction;
+    private Integer quoteRequired;
+    private Integer knowledgeIncluded;
+    private LocalDateTime foundAt;
+    private String sourceFilePath;
     private String sourceSheet;
     private Integer sourceRowNumber;
-    private String title;
-    private String faultCode;
-    private String symptomSummary;
-    private String causeSummary;
-    private String solutionSummary;
-    private String preventionSummary;
-    private String tags;
-    private String status;
-    private Integer qualityScore;
-    private String qualityStatus;
-    private String qualityIssues;
+    private String sourceHash;
     private Long createdBy;
     private Long updatedBy;
     private LocalDateTime createTime;

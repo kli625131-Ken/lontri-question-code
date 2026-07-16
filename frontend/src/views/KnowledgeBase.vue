@@ -148,7 +148,10 @@
             <el-input v-model="filters.tagKeyword" :placeholder="text.tagPlaceholder" @keyup.enter="applyFilters" />
           </el-form-item>
           <el-form-item :label="text.status">
-            <el-select v-model="filters.status" clearable :placeholder="text.defaultPublished">
+            <el-select v-model="filters.status" clearable :placeholder="text.defaultActive">
+              <el-option :label="text.allActive" value="" />
+              <el-option :label="text.draft" value="DRAFT" />
+              <el-option :label="text.needsReview" value="NEEDS_REVIEW" />
               <el-option :label="text.published" value="PUBLISHED" />
               <el-option :label="text.disabled" value="DISABLED" />
             </el-select>
@@ -182,6 +185,16 @@
             <template #default="{ row }">{{ row.projectName || '-' }}</template>
           </el-table-column>
           <el-table-column prop="tags" :label="text.tags" min-width="180" show-overflow-tooltip />
+          <el-table-column :label="text.status" width="100">
+            <template #default="{ row }">
+              <el-tag :type="statusTagType(row.status)" effect="plain">{{ statusText(row.status) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="text.quality" width="120">
+            <template #default="{ row }">
+              <el-tag :type="qualityTagType(row)" effect="plain">{{ row.qualityScore ?? ragScore(row) }}{{ text.score }}</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column :label="text.chunkCount" width="95">
             <template #default="{ row }">{{ buildChunks(row).length }}</template>
           </el-table-column>
@@ -235,9 +248,19 @@
           <div class="info-grid">
             <div class="info-pair"><span>{{ text.source }}</span><strong>{{ sourceTypeText(detail.sourceType) }}</strong></div>
             <div class="info-pair"><span>{{ text.faultCode }}</span><strong>{{ detail.faultCode || 'OTHER' }}</strong></div>
+            <div class="info-pair"><span>{{ text.status }}</span><strong>{{ statusText(detail.status) }}</strong></div>
+            <div class="info-pair"><span>{{ text.quality }}</span><strong>{{ detail.qualityScore ?? ragScore(detail) }}{{ text.score }}</strong></div>
             <div class="info-pair"><span>{{ text.keywordCount }}</span><strong>{{ extractKeywords(detail).length }}</strong></div>
             <div class="info-pair"><span>{{ text.questionCount }}</span><strong>{{ buildQuestions(detail).length }}</strong></div>
           </div>
+          <el-alert
+            v-if="detail.qualityIssues"
+            class="quality-alert"
+            :title="detail.qualityIssues"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
         </section>
 
         <section class="detail-card" v-for="block in detailBlocks" :key="block.key">
@@ -249,6 +272,10 @@
           <el-button v-if="detail.issueId" @click="goIssue(detail)">
             <el-icon><Link /></el-icon>
             {{ text.sourceIssue }}
+          </el-button>
+          <el-button v-if="detail.sourceType === SOURCE_OPERATIONS && detail.sourceRefId" @click="goMaintenanceFinding(detail)">
+            <el-icon><Tools /></el-icon>
+            来源运维记录
           </el-button>
           <el-button @click="openChunks(detail)">
             <el-icon><Document /></el-icon>
@@ -360,6 +387,14 @@
               <el-option v-for="item in faultCodeOptions" :key="item.value" :label="`${item.value} ${item.label}`" :value="item.value" />
             </el-select>
           </el-form-item>
+          <el-form-item :label="text.status">
+            <el-select v-model="editForm.status">
+              <el-option :label="text.draft" value="DRAFT" />
+              <el-option :label="text.needsReview" value="NEEDS_REVIEW" />
+              <el-option :label="text.published" value="PUBLISHED" />
+              <el-option :label="text.disabled" value="DISABLED" />
+            </el-select>
+          </el-form-item>
           <el-form-item :label="text.tags">
             <el-input v-model="editForm.tags" :placeholder="text.tagsPlaceholder" />
           </el-form-item>
@@ -372,6 +407,30 @@
         <el-button @click="editVisible = false">{{ text.cancel }}</el-button>
         <el-button type="primary" :loading="saving" @click="submitEdit">{{ text.save }}</el-button>
       </template>
+    </el-dialog>
+
+    <el-dialog v-model="importReportVisible" :title="text.importReport" width="760px">
+      <div v-if="importReport" class="import-report">
+        <div class="report-grid">
+          <div><span>{{ text.file }}</span><strong>{{ importReport.fileName }}</strong></div>
+          <div><span>{{ text.sheetCount }}</span><strong>{{ numberText(importReport.sheetCount || 0) }}</strong></div>
+          <div><span>{{ text.importedRows }}</span><strong>{{ numberText(importReport.importedRows || 0) }}</strong></div>
+          <div><span>{{ text.insertedRows }}</span><strong>{{ numberText(importReport.insertedRows || 0) }}</strong></div>
+          <div><span>{{ text.updatedRows }}</span><strong>{{ numberText(importReport.updatedRows || 0) }}</strong></div>
+          <div><span>{{ text.skippedRows }}</span><strong>{{ numberText(importReport.skippedRows || 0) }}</strong></div>
+          <div><span>{{ text.reviewRows }}</span><strong>{{ numberText(importReport.reviewRows || 0) }}</strong></div>
+        </div>
+        <el-table :data="importReport.messages || []" max-height="320" :empty-text="text.noImportMessages">
+          <el-table-column prop="level" :label="text.level" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.level === 'REVIEW' ? 'warning' : 'info'" effect="plain">{{ row.level }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="sheetName" :label="text.sheet" width="150" show-overflow-tooltip />
+          <el-table-column prop="rowNumber" :label="text.row" width="80" />
+          <el-table-column prop="message" :label="text.message" min-width="260" show-overflow-tooltip />
+        </el-table>
+      </div>
     </el-dialog>
   </div>
 </template>
@@ -392,6 +451,7 @@ import {
   Refresh,
   Search,
   Setting,
+  Tools,
   Upload
 } from '@element-plus/icons-vue'
 import {
@@ -409,14 +469,18 @@ import { formatDateTime, numberText } from '@/utils/format'
 
 const SOURCE_ISSUE_LEDGER = 'ISSUE_LEDGER'
 const SOURCE_COMPANY_EXCEL = 'COMPANY_EXCEL'
+const SOURCE_OPERATIONS = 'OPERATIONS'
 
 const zh = {
   issueLedgerTitle: '\u95ee\u9898\u53f0\u8d26\u77e5\u8bc6\u5e93',
   companyExcelTitle: '\u516c\u53f8\u95ee\u9898\u7ecf\u9a8c\u5e93',
+  operationsTitle: '\u8fd0\u7ef4\u6c89\u6dc0\u77e5\u8bc6\u5e93',
   issueSource: '\u65e5\u5e38\u5ba2\u6237\u53cd\u9988\u95ee\u9898',
   companySource: '\u5386\u53f2\u95ee\u9898\u7ecf\u9a8c Excel',
+  operationsSource: '\u8fd0\u7ef4\u73b0\u573a\u5b8c\u6210\u9879',
   issueDesc: '\u7531\u95ed\u73af\u95ee\u9898\u81ea\u52a8\u6c89\u6dc0\uff0c\u627f\u8f7d\u5ba2\u6237\u73b0\u573a\u53cd\u9988\u3001\u6392\u67e5\u8fc7\u7a0b\u3001\u539f\u56e0\u5206\u6790\u548c\u5904\u7406\u65b9\u6848\u3002',
-  companyDesc: '\u7531\u516c\u53f8\u6574\u7406\u7684\u95ee\u9898\u7ecf\u9a8c\u8868\u5bfc\u5165\uff0c\u6bcf\u4e2a\u5de5\u4f5c\u8868\u4f5c\u4e3a\u5206\u7ec4\uff0c\u6bcf\u884c\u8f6c\u4e3a\u4e00\u6761\u53ef\u68c0\u7d22\u77e5\u8bc6\u3002'
+  companyDesc: '\u7531\u516c\u53f8\u6574\u7406\u7684\u95ee\u9898\u7ecf\u9a8c\u8868\u5bfc\u5165\uff0c\u6bcf\u4e2a\u5de5\u4f5c\u8868\u4f5c\u4e3a\u5206\u7ec4\uff0c\u6bcf\u884c\u8f6c\u4e3a\u4e00\u6761\u53ef\u68c0\u7d22\u77e5\u8bc6\u3002',
+  operationsDesc: '\u7531\u8fd0\u7ef4\u6279\u6b21\u4e2d\u5df2\u5b8c\u6210\u7684\u73b0\u573a\u8bb0\u5f55\u81ea\u52a8\u6c89\u6dc0\uff0c\u4fbf\u4e8e\u5b63\u5ea6\u590d\u76d8\u548c\u540e\u7eed\u76f8\u4f3c\u95ee\u9898\u67e5\u8be2\u3002'
 }
 
 const text = {
@@ -432,9 +496,13 @@ const text = {
   tags: '\u6807\u7b7e',
   tagPlaceholder: '\u8f93\u5165\u6807\u7b7e\u5173\u952e\u8bcd',
   status: '\u72b6\u6001',
-  defaultPublished: '\u9ed8\u8ba4\u53ea\u770b\u5df2\u53d1\u5e03',
+  defaultActive: '\u9ed8\u8ba4\u663e\u793a\u672a\u505c\u7528',
+  allActive: '\u5168\u90e8\u672a\u505c\u7528',
+  draft: '\u5f85\u6574\u7406',
+  needsReview: '\u9700\u590d\u6838',
   published: '\u5df2\u53d1\u5e03',
   disabled: '\u5df2\u505c\u7528',
+  quality: '\u8d28\u91cf',
   keyword: '\u5173\u952e\u8bcd',
   searchPlaceholder: '\u641c\u7d22\u6807\u9898\u3001\u73b0\u8c61\u3001\u539f\u56e0\u3001\u65b9\u6848\u3001\u9884\u9632\u63aa\u65bd',
   reset: '\u91cd\u7f6e',
@@ -481,7 +549,20 @@ const text = {
   title: '\u6807\u9898',
   tagsPlaceholder: '\u591a\u4e2a\u6807\u7b7e\u7528\u9017\u53f7\u5206\u9694',
   cancel: '\u53d6\u6d88',
-  save: '\u4fdd\u5b58'
+  save: '\u4fdd\u5b58',
+  importReport: '\u5bfc\u5165\u62a5\u544a',
+  file: '\u6587\u4ef6',
+  sheetCount: '\u5de5\u4f5c\u8868',
+  importedRows: '\u5165\u5e93',
+  insertedRows: '\u65b0\u589e',
+  updatedRows: '\u66f4\u65b0',
+  skippedRows: '\u8df3\u8fc7',
+  reviewRows: '\u9700\u590d\u6838',
+  noImportMessages: '\u65e0\u9700\u5904\u7406\u7684\u63d0\u793a',
+  level: '\u7ea7\u522b',
+  sheet: '\u5de5\u4f5c\u8868',
+  row: '\u884c\u53f7',
+  message: '\u8bf4\u660e'
 }
 
 const router = useRouter()
@@ -497,12 +578,14 @@ const qaVisible = ref(false)
 const qaSearched = ref(false)
 const strategyVisible = ref(false)
 const chunkSettingVisible = ref(false)
+const importReportVisible = ref(false)
 const knowledgeRows = ref([])
 const qaRows = ref([])
 const projects = ref([])
 const ruleOptions = ref({})
 const detail = ref(null)
 const chunkTarget = ref(null)
+const importReport = ref(null)
 const qaResults = ref([])
 const activeSource = ref(null)
 const qaSource = ref(null)
@@ -513,7 +596,7 @@ const questionCount = ref(3)
 const pagination = reactive({ page: 1, pageSize: 20, total: 0 })
 const filters = reactive({ projectId: undefined, systemType: '', faultCode: '', tagKeyword: '', causeCategory: '', keyword: '', status: '' })
 const qaForm = reactive({ question: '' })
-const editForm = reactive({ title: '', faultCode: 'OTHER', symptomSummary: '', causeSummary: '', solutionSummary: '', preventionSummary: '', tags: '' })
+const editForm = reactive({ title: '', faultCode: 'OTHER', status: 'DRAFT', symptomSummary: '', causeSummary: '', solutionSummary: '', preventionSummary: '', tags: '' })
 
 const sourceCards = [
   {
@@ -529,6 +612,13 @@ const sourceCards = [
     sourceLabel: zh.companySource,
     description: zh.companyDesc,
     icon: Files
+  },
+  {
+    type: SOURCE_OPERATIONS,
+    title: zh.operationsTitle,
+    sourceLabel: zh.operationsSource,
+    description: zh.operationsDesc,
+    icon: Tools
   }
 ]
 
@@ -645,6 +735,7 @@ function openEdit() {
   Object.assign(editForm, {
     title: detail.value?.title || '',
     faultCode: detail.value?.faultCode || 'OTHER',
+    status: detail.value?.status || 'DRAFT',
     symptomSummary: detail.value?.symptomSummary || '',
     causeSummary: detail.value?.causeSummary || '',
     solutionSummary: detail.value?.solutionSummary || '',
@@ -696,11 +787,45 @@ async function handleUploadChange(uploadFile) {
   uploading.value = true
   try {
     const res = await uploadKnowledgeDocument(uploadFile.raw)
-    ElMessage.success(`\u5df2\u5bfc\u5165 ${numberText(res.data || 0)} \u6761\u77e5\u8bc6`)
+    importReport.value = normalizeImportReport(res.data)
+    ElMessage.success(`\u5df2\u5165\u5e93 ${numberText(importReport.value.importedRows || 0)} \u6761\u77e5\u8bc6`)
+    importReportVisible.value = true
     await Promise.all([loadSourceStats(), activeSource.value ? loadKnowledge() : Promise.resolve()])
   } finally {
     uploading.value = false
   }
+}
+
+function normalizeImportReport(data) {
+  if (typeof data === 'number') {
+    return { importedRows: data, insertedRows: data, updatedRows: 0, skippedRows: 0, reviewRows: 0, messages: [] }
+  }
+  return data || { importedRows: 0, insertedRows: 0, updatedRows: 0, skippedRows: 0, reviewRows: 0, messages: [] }
+}
+
+function statusText(status) {
+  return {
+    DRAFT: text.draft,
+    NEEDS_REVIEW: text.needsReview,
+    PUBLISHED: text.published,
+    DISABLED: text.disabled
+  }[status] || text.draft
+}
+
+function statusTagType(status) {
+  return {
+    DRAFT: 'info',
+    NEEDS_REVIEW: 'warning',
+    PUBLISHED: 'success',
+    DISABLED: 'danger'
+  }[status] || 'info'
+}
+
+function qualityTagType(row) {
+  const score = row.qualityScore ?? ragScore(row)
+  if (score >= 80) return 'success'
+  if (score >= 60) return 'warning'
+  return 'danger'
 }
 
 async function openQa(source) {
@@ -783,6 +908,9 @@ function sourceText(row) {
   if (row.sourceType === SOURCE_COMPANY_EXCEL) {
     return [row.sourceName, row.sourceSheet, row.sourceRowNumber ? `\u7b2c${row.sourceRowNumber}\u884c` : ''].filter(Boolean).join(' / ')
   }
+  if (row.sourceType === SOURCE_OPERATIONS) {
+    return [row.sourceName || zh.operationsTitle, row.sourceSheet, row.sourceRefId ? `#${row.sourceRefId}` : ''].filter(Boolean).join(' / ')
+  }
   return [row.sourceName || zh.issueLedgerTitle, row.issueNo].filter(Boolean).join(' / ')
 }
 
@@ -794,11 +922,17 @@ function detailSourceText(row) {
 }
 
 function sourceTypeText(type) {
-  return type === SOURCE_COMPANY_EXCEL ? zh.companyExcelTitle : zh.issueLedgerTitle
+  if (type === SOURCE_COMPANY_EXCEL) return zh.companyExcelTitle
+  if (type === SOURCE_OPERATIONS) return zh.operationsTitle
+  return zh.issueLedgerTitle
 }
 
 function goIssue(row) {
   if (row?.issueId) router.push(`/issues/${row.issueId}`)
+}
+
+function goMaintenanceFinding(row) {
+  if (row?.sourceRefId) router.push({ path: '/maintenance', query: { findingId: row.sourceRefId } })
 }
 
 function valueText(value) {
@@ -837,7 +971,7 @@ onMounted(async () => {
 
 .source-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
   align-items: stretch;
 }
@@ -1127,6 +1261,41 @@ onMounted(async () => {
   gap: 10px;
 }
 
+.quality-alert {
+  margin-top: 14px;
+}
+
+.dialog-grid,
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.import-report {
+  display: grid;
+  gap: 16px;
+}
+
+.report-grid > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--kb-line);
+  border-radius: 8px;
+  background: var(--kb-soft);
+}
+
+.report-grid span {
+  color: var(--kb-muted);
+  font-size: 12px;
+}
+
+.report-grid strong {
+  color: var(--kb-text);
+  font-size: 15px;
+}
+
 .readable-text,
 .chunk-card p {
   margin: 0;
@@ -1188,6 +1357,7 @@ onMounted(async () => {
 }
 
 @media (max-width: 1280px) {
+  .source-grid,
   .filter-grid,
   .processing-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));

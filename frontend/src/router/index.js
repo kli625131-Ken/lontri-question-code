@@ -66,6 +66,16 @@ const routes = [
         }
       },
       {
+        path: 'maintenance',
+        name: 'Maintenance',
+        component: () => import('@/views/MaintenanceCenter.vue'),
+        meta: {
+          title: '运维管理',
+          subtitle: '管理运维前安排、现场记录、报价和报告输出',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'knowledge',
         name: 'Knowledge',
         component: () => import('@/views/KnowledgeBase.vue'),

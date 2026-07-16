@@ -21,6 +21,9 @@ request.interceptors.request.use(
 
 request.interceptors.response.use(
   response => {
+    if (response.config?.responseType === 'blob') {
+      return response
+    }
     const payload = response.data
     if (payload.code !== 200) {
       if (payload.code === 403) {
