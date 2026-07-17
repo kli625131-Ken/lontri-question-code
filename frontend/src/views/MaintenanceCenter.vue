@@ -126,7 +126,10 @@
           <div class="tab-toolbar">
             <span>{{ selectedVisit.assignments?.length || 0 }} 条安排 / {{ selectedVisit.personnel?.length || 0 }} 名人员</span>
             <div class="toolbar-actions">
-              <el-button size="small" :disabled="isTemporary" @click="openPersonnelCreate">新增人员</el-button>
+              <el-button size="small" @click="personnelReportDialogVisible = true">
+                <el-icon><User /></el-icon>
+                人员报备
+              </el-button>
               <el-button size="small" type="primary" :disabled="isTemporary" @click="openAssignmentCreate">新增安排</el-button>
             </div>
           </div>
@@ -161,75 +164,39 @@
               </el-table>
             </section>
 
-            <section class="ops-panel">
-              <div class="panel-head">
-                <div>
-                  <div class="block-title">巡检路线归纳</div>
-                  <p class="section-hint">按楼层、区域和事项自动归纳路线，便于现场按路线执行。</p>
-                </div>
-              </div>
-              <div class="route-summary-grid">
-                <article v-for="route in routeSummaries" :key="route.name">
-                  <strong>{{ route.name }}</strong>
-                  <span>{{ route.count }} 项 / {{ route.people }}</span>
-                  <p>{{ route.tasks }}</p>
-                </article>
-              </div>
-            </section>
-
-            <section class="ops-panel">
-              <div class="panel-head">
-                <div>
-                  <div class="block-title">人员报备</div>
-                  <p class="section-hint">来自“运维人员-外发 / 人员报备”Sheet。</p>
-                </div>
-              </div>
-              <el-table :data="selectedVisit.personnel || []" empty-text="暂无人员报备" max-height="300" border>
-                <el-table-column prop="personName" label="姓名" width="110" />
-                <el-table-column prop="phone" label="电话" width="138" />
-                <el-table-column prop="roleName" label="角色" min-width="120" />
-                <el-table-column prop="notes" label="备注" min-width="160" show-overflow-tooltip />
-                <el-table-column label="操作" width="112">
-                  <template #default="{ row }">
-                    <el-button link type="primary" :disabled="isTemporary" @click="openPersonnelEdit(row)">编辑</el-button>
-                    <el-button link type="danger" :disabled="isTemporary" @click="removePersonnel(row)">删除</el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </section>
           </div>
 
           <section class="ops-panel schedule-panel">
             <div class="panel-head">
               <div>
                 <div class="block-title">巡检路线日程视图</div>
-                <p class="section-hint">按路线和时间展开排期，任务块保留楼层、事项和人员信息，后续可扩展拖拽调整。</p>
+                <p class="section-hint">按楼层巡检路线和时间展开排期。</p>
               </div>
               <el-date-picker v-model="scheduleDate" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" />
             </div>
-            <div class="schedule-board" v-if="scheduleRows.length">
+            <div class="schedule-board" v-if="scheduleItems.length">
               <div class="schedule-grid">
                 <div class="schedule-corner">巡检路线</div>
                 <div class="schedule-hours">
                   <span v-for="hour in scheduleHours" :key="hour">{{ hour }}:00</span>
                 </div>
-                <template v-for="row in scheduleRows" :key="row.owner">
-                  <div class="schedule-person">{{ row.owner }}</div>
-                  <div class="schedule-track">
+                <div class="schedule-route-label">楼层巡检路线</div>
+                <div class="schedule-hour-cells">
+                  <div v-for="group in scheduleHourGroups" :key="group.hour" class="schedule-hour-cell">
                     <button
-                      v-for="block in row.blocks"
-                      :key="block.id"
+                      v-if="group.items.length"
                       type="button"
-                      class="schedule-block"
-                      :class="block.tone"
-                      :style="{ left: block.left + '%', width: block.width + '%' }"
-                      @click="openAssignmentEdit(block.raw)"
+                      class="schedule-route-item"
+                      :class="group.tone"
+                      :title="group.tooltip"
+                      @click="openAssignmentEdit(group.raw)"
                     >
-                      <strong>{{ block.title }}</strong>
-                      <span>{{ block.timeText }}</span>
+                      <span>{{ group.timeText }}</span>
+                      <strong>{{ group.floorText }}</strong>
+                      <em>{{ group.title }}</em>
                     </button>
                   </div>
-                </template>
+                </div>
               </div>
             </div>
             <el-empty v-else description="暂无可视化排期" :image-size="88" />
@@ -237,43 +204,132 @@
         </el-tab-pane>
 
         <el-tab-pane label="检查清单" name="checklist">
-          <div class="tab-toolbar">
-            <span>按历史“检查清单”Sheet 展示：序号、类别、检查项、楼层/区域、检查结果、备注。</span>
-            <el-input v-model="findingKeyword" class="inline-search" clearable placeholder="搜索楼层、区域、问题" />
-          </div>
-          <section class="ops-panel template-table-panel">
-            <div class="check-summary">
-              <div v-for="item in checklistStats" :key="item.label">
-                <span>{{ item.label }}</span>
-                <strong :class="item.className">{{ item.value }}</strong>
+          <div class="checklist-page">
+            <section class="ops-panel checklist-matrix-panel">
+              <div class="checklist-section-head">
+                <div>
+                  <span class="section-index">01</span>
+                  <div>
+                    <div class="block-title">检查清单视图</div>
+                    <p class="section-hint">按检查项与楼层交叉呈现，异常标签来源于“检查详细记录”。</p>
+                  </div>
+                </div>
+                <div class="checklist-head-meta">
+                  <div><span>检查日期</span><strong>{{ checklistInspectionDate }}</strong></div>
+                  <div><span>覆盖楼层</span><strong>{{ checklistFloors.length }}</strong></div>
+                  <div><span>异常记录</span><strong class="danger-text">{{ checklistFindings.length }}</strong></div>
+                </div>
               </div>
-            </div>
-            <el-table :data="checklistRows" empty-text="暂无检查清单数据" max-height="560" border>
-              <el-table-column prop="index" label="序号" width="72" fixed />
-              <el-table-column prop="category" label="类别" min-width="130" />
-              <el-table-column prop="checkItem" label="检查项" min-width="230" show-overflow-tooltip />
-              <el-table-column prop="floorName" label="楼层" width="110" />
-              <el-table-column prop="areaName" label="位置/区域" min-width="150" show-overflow-tooltip />
-              <el-table-column label="检查结果" width="128">
-                <template #default="{ row }">
-                  <el-tag :type="row.stateType" effect="plain">{{ row.stateText }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="remark" label="备注 / 异常内容" min-width="280" show-overflow-tooltip />
-              <el-table-column label="详细记录" width="110" fixed="right">
-                <template #default="{ row }">
-                  <el-button v-if="row.finding" link type="primary" @click="selectFinding(row.finding)">查看</el-button>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-            </el-table>
-            <div class="floor-chip-list inline-floor-list">
-              <button v-for="floor in floorFilters" :key="floor.name" type="button" @click="findingKeyword = floor.name">
-                <strong>{{ floor.name }}</strong>
-                <span>{{ floor.count }} 条</span>
-              </button>
-            </div>
-          </section>
+
+              <div class="checklist-legend">
+                <span><i class="legend-dot normal"></i>正常 / 未发现异常</span>
+                <span><i class="legend-dot resolved"></i>发现问题，已解决</span>
+                <span><i class="legend-dot open"></i>发现问题，待解决</span>
+                <em>点击异常标签查看详细记录</em>
+              </div>
+
+              <div class="checklist-matrix-scroll">
+                <table class="checklist-matrix">
+                  <thead>
+                    <tr>
+                      <th class="matrix-category-column">分类</th>
+                      <th class="matrix-item-column">检查项</th>
+                      <th v-for="floor in checklistFloors" :key="floor">{{ floor }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in checklistMatrixRows" :key="row.key">
+                      <th v-if="row.categoryRowSpan" :rowspan="row.categoryRowSpan" class="matrix-category-cell">
+                        <span>{{ row.categoryIndex }}</span>
+                        <strong>{{ row.category }}</strong>
+                      </th>
+                      <td class="matrix-item-cell">{{ row.label }}</td>
+                      <td v-for="cell in row.cells" :key="cell.floor" class="matrix-status-cell">
+                        <span v-if="!cell.issues.length" class="matrix-normal-mark" title="未发现异常">&#10003;</span>
+                        <button
+                          v-else
+                          type="button"
+                          class="matrix-issue-tag"
+                          :class="cell.hasOpen ? 'is-open' : 'is-resolved'"
+                          :title="cell.tooltip"
+                          @click="selectFinding(cell.issues[0].finding)"
+                        >
+                          {{ cell.label }}
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="ops-panel checklist-exception-panel">
+              <div class="checklist-section-head">
+                <div>
+                  <span class="section-index">02</span>
+                  <div>
+                    <div class="block-title">异常情况记录</div>
+                    <p class="section-hint">本次检查异常按五类自动汇总，状态随详细记录实时更新。</p>
+                  </div>
+                </div>
+                <el-button link type="primary" @click="goTab('findings')">查看全部详细记录</el-button>
+              </div>
+
+              <div class="checklist-report-summary">
+                <p>
+                  本次检查共形成 <strong>{{ checklistSummaryTotals.total }}</strong> 项记录，
+                  正常 <strong class="success-text">{{ checklistSummaryTotals.normal }}</strong> 项，
+                  异常 <strong class="danger-text">{{ checklistSummaryTotals.abnormal }}</strong> 项；
+                  其中已解决 <strong>{{ checklistSummaryTotals.resolved }}</strong> 项，
+                  待解决 <strong class="danger-text">{{ checklistSummaryTotals.open }}</strong> 项。
+                </p>
+                <ol v-if="checklistSummaryTotals.abnormal" class="condensed-category-list">
+                  <li v-for="item in checklistCategorySummary.filter(row => row.total)" :key="item.key">
+                    <span :class="item.tone"></span>
+                    <p><strong>{{ item.label }}：</strong>{{ item.summary }}</p>
+                  </li>
+                </ol>
+                <el-empty v-else description="本次检查未发现异常" :image-size="72" />
+              </div>
+            </section>
+
+            <section class="ops-panel checklist-solution-panel">
+              <div class="checklist-section-head">
+                <div>
+                  <span class="section-index">03</span>
+                  <div>
+                    <div class="block-title">解决方案</div>
+                    <p class="section-hint">已解决项提炼处理结果，待解决项按问题、影响和方案形成行动清单。</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="concise-solution-summary">
+                <section>
+                  <span class="solution-number">1</span>
+                  <div>
+                    <h4>已解决问题</h4>
+                    <p>{{ resolvedChecklistSummary }}</p>
+                  </div>
+                </section>
+                <section>
+                  <span class="solution-number pending">2</span>
+                  <div>
+                    <h4>待解决问题</h4>
+                    <ol v-if="pendingChecklistCategorySolutions.length" class="pending-category-summary-list">
+                      <li v-for="(item, index) in pendingChecklistCategorySolutions" :key="item.key">
+                        <strong>2.{{ index + 1 }} {{ item.label }}</strong>
+                        <p><span>问题概述：</span>{{ item.overview }}</p>
+                        <p><span>对客户影响：</span>{{ item.impact }}</p>
+                        <p><span>解决方案：</span>{{ item.solution }}</p>
+                      </li>
+                    </ol>
+                    <p v-else>本次检查暂无待解决问题。</p>
+                  </div>
+                </section>
+              </div>
+            </section>
+          </div>
         </el-tab-pane>
 
         <el-tab-pane label="检查详细记录" name="findings">
@@ -298,7 +354,6 @@
                 </el-table-column>
                 <el-table-column prop="issueDescription" label="问题描述" min-width="260" show-overflow-tooltip />
                 <el-table-column prop="handlingResult" label="进一步查验 / 处理措施" min-width="260" show-overflow-tooltip />
-                <el-table-column prop="followUpAction" label="后续动作" min-width="180" show-overflow-tooltip />
                 <el-table-column label="完成情况" width="128">
                   <template #default="{ row }">
                     <el-tag size="small" :type="findingStatusType(row.completionStatus)" effect="plain">{{ row.completionStatus || '待处理' }}</el-tag>
@@ -643,6 +698,31 @@
       <template #footer><el-button @click="assignmentDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitAssignment">保存</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="personnelReportDialogVisible" title="人员报备" width="min(860px, calc(100vw - 32px))">
+      <div class="personnel-report-head">
+        <span>共 {{ selectedVisit?.personnel?.length || 0 }} 名报备人员</span>
+        <el-button size="small" type="primary" :disabled="isTemporary" @click="openPersonnelCreate">
+          <el-icon><Plus /></el-icon>
+          新增人员
+        </el-button>
+      </div>
+      <el-table :data="selectedVisit?.personnel || []" empty-text="暂无人员报备" max-height="480" border>
+        <el-table-column prop="personName" label="姓名" width="120" />
+        <el-table-column prop="phone" label="电话" width="150" />
+        <el-table-column prop="roleName" label="角色" min-width="140" />
+        <el-table-column prop="notes" label="备注" min-width="200" show-overflow-tooltip />
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" :disabled="isTemporary" @click="openPersonnelEdit(row)">编辑</el-button>
+            <el-button link type="danger" :disabled="isTemporary" @click="removePersonnel(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="personnelReportDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="personnelDialogVisible" :title="editingPersonnel ? '编辑人员' : '新增人员'" width="560px">
       <el-form :model="personnelForm" label-position="top" class="dialog-grid">
         <el-form-item label="姓名"><el-input v-model="personnelForm.personName" /></el-form-item>
@@ -749,6 +829,7 @@ const filters = reactive({ projectId: undefined, status: '', year: new Date().ge
 const visitDialogVisible = ref(false)
 const batchDrawerVisible = ref(false)
 const assignmentDialogVisible = ref(false)
+const personnelReportDialogVisible = ref(false)
 const personnelDialogVisible = ref(false)
 const findingDialogVisible = ref(false)
 const quoteDialogVisible = ref(false)
@@ -765,6 +846,57 @@ const personnelForm = reactive(defaultPersonnelForm())
 const findingForm = reactive(defaultFindingForm())
 const quoteForm = reactive(defaultQuoteForm())
 const closeForm = reactive({ summary: '', conclusion: '', actualEndAt: '' })
+
+const checklistCategoryDefinitions = [
+  {
+    key: 'lighting',
+    label: '灯具状态异常',
+    tone: 'tone-lighting',
+    items: [
+      { key: 'lighting-on', label: '灯具点亮状态' },
+      { key: 'lighting-stability', label: '灯具闪烁 / 亮度异常' },
+      { key: 'lighting-power', label: '灯具回路 / 供电状态' }
+    ]
+  },
+  {
+    key: 'panel',
+    label: '面板控制异常',
+    tone: 'tone-panel',
+    items: [
+      { key: 'panel-response', label: '面板控制响应' },
+      { key: 'panel-scene', label: '场景 / 时控执行' },
+      { key: 'panel-signal', label: '面板信号 / 连接状态' }
+    ]
+  },
+  {
+    key: 'gateway',
+    label: '网关状态异常',
+    tone: 'tone-gateway',
+    items: [
+      { key: 'gateway-online', label: '网关在线状态' },
+      { key: 'gateway-connection', label: '网关连接 / 配置状态' }
+    ]
+  },
+  {
+    key: 'device',
+    label: '设备/驱动/通讯异常',
+    tone: 'tone-device',
+    items: [
+      { key: 'device-cu', label: 'CU / Bridge 通讯状态' },
+      { key: 'device-driver', label: '设备 / 驱动工作状态' },
+      { key: 'device-network', label: '路由器 / 交换机状态' }
+    ]
+  },
+  {
+    key: 'cloud',
+    label: '云端控制异常',
+    tone: 'tone-cloud',
+    items: [
+      { key: 'cloud-control', label: '云端 / 远程控制状态' },
+      { key: 'cloud-data', label: '能耗 / 数据上报状态' }
+    ]
+  }
+]
 
 const isTemporary = computed(() => userStore.isTemporary)
 const selectableProjects = computed(() => (projects.value || []).filter(project => (project.projectLevel || 'PROJECT') === 'PROJECT' && Number(project.isActive) === 1))
@@ -791,7 +923,7 @@ const visitProgress = computed(() => {
   const checks = [
     visitStats.value.assignments > 0,
     visitStats.value.personnel > 0,
-    checklistRows.value.length > 0,
+    checklistRecords.value.length > 0,
     visitStats.value.findings > 0,
     visitStats.value.quoteItems > 0 || visitStats.value.quoteRequired === 0,
     selectedVisit.value?.summary || selectedVisit.value?.conclusion
@@ -806,7 +938,7 @@ const visitKpis = computed(() => [
 ])
 const tabSteps = computed(() => [
   { tab: 'assignments', title: '运维前安排', icon: 'Calendar', countText: `${visitStats.value.assignments} 条安排`, done: visitStats.value.assignments > 0 },
-  { tab: 'checklist', title: '检查清单', icon: 'Checked', countText: `${checklistRows.value.length} 项检查`, done: checklistRows.value.length > 0 },
+  { tab: 'checklist', title: '检查清单', icon: 'Checked', countText: `${checklistRecords.value.length} 条检查记录`, done: checklistRecords.value.length > 0 },
   { tab: 'findings', title: '检查详细记录', icon: 'Tickets', countText: `${visitStats.value.findings} 条记录`, done: visitStats.value.findings > 0 },
   { tab: 'quotes', title: '备品报价', icon: 'Goods', countText: moneyText(quoteTotal.value), done: visitStats.value.quoteItems > 0 },
   { tab: 'report', title: '运维报告', icon: 'Document', countText: selectedVisit.value?.status === 'CLOSED' ? '可归档' : '可预览', done: Boolean(selectedVisit.value?.summary || selectedVisit.value?.conclusion) }
@@ -840,72 +972,126 @@ const selectedFinding = computed(() => {
   const rows = selectedVisit.value?.findings || []
   return rows.find(item => item.id === selectedFindingId.value) || filteredFindings.value[0] || rows[0] || null
 })
-const checklistRows = computed(() => {
-  const rows = filteredFindings.value.map((item, index) => ({
-    index: index + 1,
-    category: inferCheckCategory(item),
-    checkItem: inferCheckItem(item),
-    floorName: item.floorName || '-',
-    areaName: item.areaName || '-',
-    remark: item.issueDescription || item.handlingResult || '-',
-    stateText: isUnresolvedStatus(item.completionStatus) ? '异常/待处理' : '正常/已记录',
-    stateType: isUnresolvedStatus(item.completionStatus) ? 'warning' : 'success',
-    finding: item
-  }))
-  if (rows.length) return rows
-  return ['灯具是否有不亮现象', '是否能正常控制', '网关是否在线', 'CU 通讯是否正常', '能耗数据是否正常'].map((checkItem, index) => ({
-    index: index + 1,
-    category: inferCheckCategory({ issueDescription: checkItem }),
-    checkItem,
-    floorName: '-',
-    areaName: '-',
-    remark: '暂无异常记录',
-    stateText: '无数据',
-    stateType: 'info',
-    finding: null
-  }))
+const checklistRecords = computed(() => selectedVisit.value?.findings || [])
+const checklistFindings = computed(() => checklistRecords.value.filter(isChecklistAbnormalFinding))
+const checklistFloors = computed(() => {
+  const floors = [...new Set(checklistRecords.value.map(checklistFloorName).filter(Boolean))]
+  return floors.length ? floors.sort(compareFloorNames) : ['未标注']
 })
-const checklistStats = computed(() => [
-  { label: '检查项', value: checklistRows.value.length },
-  { label: '异常项', value: visitStats.value.unresolved, className: visitStats.value.unresolved ? 'warning-text' : 'success-text' },
-  { label: '已完成', value: visitStats.value.resolved, className: 'success-text' },
-  { label: '关联记录', value: visitStats.value.findings }
-])
-const floorFilters = computed(() => {
-  const map = new Map()
-  ;(selectedVisit.value?.findings || []).forEach(item => {
-    const name = item.floorName || item.areaName || '未标注'
-    map.set(name, (map.get(name) || 0) + 1)
+const checklistInspectionDate = computed(() => {
+  const counts = new Map()
+  checklistRecords.value.forEach(item => {
+    const key = dateKey(item.foundAt)
+    if (key) counts.set(key, (counts.get(key) || 0) + 1)
   })
-  return [...map.entries()].map(([name, count]) => ({ name, count })).slice(0, 16)
+  if (counts.size) return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  return dateText(selectedVisit.value?.plannedStartAt)
 })
+const checklistMatrixRows = computed(() => checklistCategoryDefinitions.flatMap((category, categoryIndex) => {
+  return category.items.map((checkItem, itemIndex) => ({
+    key: checkItem.key,
+    label: checkItem.label,
+    category: category.label,
+    categoryIndex: String(categoryIndex + 1).padStart(2, '0'),
+    categoryRowSpan: itemIndex === 0 ? category.items.length : 0,
+    cells: checklistFloors.value.map(floor => {
+      const issues = checklistFindings.value
+        .filter(item => checklistFloorName(item) === floor && checklistItemKey(item) === checkItem.key)
+        .map(finding => ({ finding, label: checklistIssueLabel(finding), open: isUnresolvedStatus(finding.completionStatus) }))
+      const hasOpen = issues.some(item => item.open)
+      return {
+        floor,
+        issues,
+        hasOpen,
+        label: issues.length > 1 ? `${issues[0].label} +${issues.length - 1}` : (issues[0]?.label || ''),
+        tooltip: issues.map(item => `${item.label}：${cleanChecklistText(item.finding.issueDescription) || cleanChecklistText(item.finding.handlingResult) || '-'}`).join('\n')
+      }
+    })
+  }))
+}))
+const checklistCategorySummary = computed(() => checklistCategoryDefinitions.map(category => {
+  const rows = checklistFindings.value.filter(item => checklistCategoryKey(item) === category.key)
+  const open = rows.filter(item => isUnresolvedStatus(item.completionStatus)).length
+  const floors = [...new Set(rows.map(checklistFloorName))]
+  const issueTypes = [...new Set(rows.map(checklistIssueLabel))]
+  const floorText = floors.length > 6 ? `${floors.slice(0, 6).join('、')} 等 ${floors.length} 个楼层` : floors.join('、')
+  const issueText = issueTypes.slice(0, 4).join('、') || '现场异常'
+  return {
+    ...category,
+    total: rows.length,
+    open,
+    resolved: rows.length - open,
+    summary: `共 ${rows.length} 项，主要涉及 ${floorText || '未标注区域'}；表现为 ${issueText}。已解决 ${rows.length - open} 项，待解决 ${open} 项。`
+  }
+}))
+const checklistSummaryTotals = computed(() => {
+  const abnormal = checklistFindings.value.length
+  const open = checklistFindings.value.filter(item => isUnresolvedStatus(item.completionStatus)).length
+  return {
+    total: checklistRecords.value.length,
+    normal: Math.max(checklistRecords.value.length - abnormal, 0),
+    abnormal,
+    open,
+    resolved: Math.max(abnormal - open, 0)
+  }
+})
+const resolvedChecklistSummary = computed(() => {
+  const rows = checklistFindings.value.filter(item => !isUnresolvedStatus(item.completionStatus))
+  if (!rows.length) return '本次检查暂无已解决问题。'
+  const categories = checklistCategoryDefinitions
+    .filter(category => rows.some(item => checklistCategoryKey(item) === category.key))
+    .map(category => category.label.replace('异常', ''))
+  const actions = [...new Set(rows
+    .map(item => meaningfulChecklistText(item.handlingResult) || meaningfulChecklistText(item.followUpAction))
+    .filter(Boolean))]
+    .slice(0, 3)
+    .map(shortChecklistText)
+  const actionText = actions.length ? `主要处理包括：${actions.join('；')}。` : '相关问题已完成处理并恢复正常。'
+  return `已完成 ${rows.length} 项问题处理，涉及 ${categories.join('、') || '现场设备'}。${actionText}建议按检查日期安排复核。`
+})
+const pendingChecklistCategorySolutions = computed(() => checklistCategoryDefinitions.flatMap(category => {
+  const rows = checklistFindings.value.filter(item => checklistCategoryKey(item) === category.key && isUnresolvedStatus(item.completionStatus))
+  if (!rows.length) return []
+  const floors = [...new Set(rows.map(checklistFloorName))]
+  const issueTypes = [...new Set(rows.map(checklistIssueLabel))]
+  const floorText = floors.length > 6 ? `${floors.slice(0, 6).join('、')} 等 ${floors.length} 个楼层` : floors.join('、')
+  const suggestedActions = [...new Set(rows
+    .map(item => meaningfulChecklistText(item.followUpAction) || meaningfulChecklistText(item.handlingResult))
+    .filter(Boolean))]
+    .slice(0, 2)
+    .map(shortChecklistText)
+  return [{
+    key: category.key,
+    label: category.label,
+    overview: `共 ${rows.length} 项，涉及 ${floorText || '未标注区域'}，主要表现为 ${issueTypes.slice(0, 4).join('、') || '现场异常'}。`,
+    impact: checklistCustomerImpact(category.key),
+    solution: suggestedActions.length ? `${suggestedActions.join('；')}。` : checklistDefaultSolution(category.key)
+  }]
+}))
 const scheduleHours = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
-const routeSummaries = computed(() => {
-  const map = new Map()
-  ;(selectedVisit.value?.assignments || []).forEach(item => {
-    const route = routeNameForAssignment(item)
-    if (!map.has(route)) map.set(route, { name: route, count: 0, people: new Set(), tasks: [] })
-    const target = map.get(route)
-    target.count += 1
-    splitOwners(item.ownerName).forEach(owner => target.people.add(owner))
-    if (item.taskItem && target.tasks.length < 3) target.tasks.push(item.taskItem)
-  })
-  return [...map.values()].map(item => ({
-    ...item,
-    people: item.people.size ? [...item.people].join('、') : '未分配',
-    tasks: item.tasks.join('；') || '暂无事项'
-  }))
+const scheduleItems = computed(() => {
+  return (selectedVisit.value?.assignments || [])
+    .flatMap((item, index) => {
+      if (scheduleDate.value && dateKey(item.scheduledAt) !== scheduleDate.value) return []
+      return toScheduleItem(item, index)
+    })
+    .sort((a, b) => a.startMinutes - b.startMinutes || a.id - b.id)
 })
-const scheduleRows = computed(() => {
-  const routes = new Map()
-  ;(selectedVisit.value?.assignments || []).forEach((item, index) => {
-    if (scheduleDate.value && dateKey(item.scheduledAt) !== scheduleDate.value) return
-    const route = routeNameForAssignment(item)
-    if (!routes.has(route)) routes.set(route, [])
-    routes.get(route).push(toScheduleBlock(item, index))
-  })
-  return [...routes.entries()].map(([owner, blocks]) => ({ owner, blocks }))
-})
+const scheduleHourGroups = computed(() => scheduleHours.map((hour, index) => {
+  const items = scheduleItems.value.filter(item => Math.floor(item.startMinutes / 60) === hour)
+  const floors = [...new Set(items.map(item => item.floorText))]
+  const titles = [...new Set(items.map(item => item.title))]
+  return {
+    hour,
+    items,
+    raw: items[0]?.raw,
+    timeText: [...new Set(items.map(item => item.timeText))].join(' / '),
+    floorText: floors.join('、'),
+    title: titles.length > 1 ? `${titles[0]} 等 ${items.length} 项` : (titles[0] || ''),
+    tooltip: items.map(item => `${item.timeText} ${item.floorText} ${item.title}`).join('\n'),
+    tone: `tone-${(index % 5) + 1}`
+  }
+}))
 const filteredQuoteItems = computed(() => {
   const keyword = quoteKeyword.value.trim().toLowerCase()
   return (selectedVisit.value?.quoteItems || []).filter(item => !keyword || [item.areaName, item.itemName, item.notes].some(value => String(value || '').toLowerCase().includes(keyword)))
@@ -984,6 +1170,7 @@ async function selectVisit(row) {
 async function loadVisitDetail(id) {
   const res = await getMaintenanceVisit(id)
   selectedVisit.value = res.data
+  syncScheduleDate(selectedVisit.value?.assignments || [])
   if (!selectedFindingId.value && selectedVisit.value?.findings?.length) {
     selectedFindingId.value = selectedVisit.value.findings[0].id
   }
@@ -1299,60 +1486,154 @@ function findingPriority(item) {
 }
 
 function inferCheckCategory(item) {
-  const text = [item.issueDescription, item.handlingResult, item.areaName].join(' ')
-  if (/GW|网关|gateway/i.test(text)) return '网关状态'
-  if (/CU|通讯|离线|通信/i.test(text)) return '设备通讯'
-  if (/能耗|数据/i.test(text)) return '能耗数据'
-  if (/时控|控制|场景|开关/i.test(text)) return '控制状态'
-  return '灯具状态'
+  return checklistCategoryDefinitions.find(category => category.key === checklistCategoryKey(item))?.label || '灯具状态异常'
 }
 
-function inferCheckItem(item) {
-  const category = inferCheckCategory(item)
+function checklistCategoryKey(item) {
+  const text = findingSearchText(item)
+  if (/云端(?:无法|不能|不可|控制异常)|平台异常|APP异常|远程控制异常/i.test(text)) return 'cloud'
+  if (/GW|网关|gateway/i.test(text)) return 'gateway'
+  if (/CU|Bridge|驱动|通讯|通信|离线|路由器|交换机|传感器|设备/i.test(text)) return 'device'
+  if (/云端|平台|APP|远程|后台|服务器/i.test(text)) return 'cloud'
+  if (/面板|开关|时控|场景|按键|不受控|无法控制|控制失效/i.test(text)) return 'panel'
+  return 'lighting'
+}
+
+function isChecklistAbnormalFinding(item) {
+  const text = findingSearchText(item)
+  const status = String(item?.completionStatus || '')
+  if (/[×✕✖]/.test(text)) return true
+  if (/[√✓]/.test(text) && !/[×✕✖]/.test(text)) return false
+  if (/正常|通过|无异常|无问题/.test(status)) return false
+  return Boolean(cleanChecklistText(item?.issueDescription) || cleanChecklistText(item?.handlingResult))
+}
+
+function cleanChecklistText(value) {
+  const text = String(value || '')
+    .replace(/[√✓×✕✖]/g, '')
+    .replace(/[；;、,，\s]+$/g, '')
+    .trim()
+  return text && !/^(正常|无异常|无问题|无)$/.test(text) ? text : ''
+}
+
+function shortChecklistText(value, maxLength = 42) {
+  const text = cleanChecklistText(value)
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text
+}
+
+function meaningfulChecklistText(value) {
+  const text = cleanChecklistText(value)
+  return text.replace(/[.。…;；,，\s]/g, '').length >= 4 ? text : ''
+}
+
+function checklistItemKey(item) {
+  const text = findingSearchText(item)
+  const category = checklistCategoryKey(item)
+  if (category === 'lighting') {
+    if (/闪烁|频闪|忽明忽暗|亮度|变暗/i.test(text)) return 'lighting-stability'
+    if (/回路|供电|电源|断电|线路/i.test(text)) return 'lighting-power'
+    return 'lighting-on'
+  }
+  if (category === 'panel') {
+    if (/场景|时控|定时|自动/i.test(text)) return 'panel-scene'
+    if (/信号|连接|丢失|脱落/i.test(text)) return 'panel-signal'
+    return 'panel-response'
+  }
+  if (category === 'gateway') {
+    if (/配置|连接|接线|网络|路由/i.test(text)) return 'gateway-connection'
+    return 'gateway-online'
+  }
+  if (category === 'device') {
+    if (/路由器|交换机|4G|网络/i.test(text)) return 'device-network'
+    if (/驱动|设备|传感器|故障|损坏/i.test(text)) return 'device-driver'
+    return 'device-cu'
+  }
+  if (/能耗|数据|上报|上传/i.test(text)) return 'cloud-data'
+  return 'cloud-control'
+}
+
+function checklistFloorName(item) {
+  const explicit = String(item?.floorName || '').trim()
+  if (explicit && !/^[-—]+$/.test(explicit)) return explicit
+  const text = [item?.areaName, item?.issueDescription].filter(Boolean).join(' ')
+  const floorMatch = text.match(/(?:^|[^0-9])(\d{1,2})\s*F(?:[^0-9]|$)/i)
+  if (floorMatch) return `${Number(floorMatch[1])}F`
+  const roomMatch = text.match(/(?:^|[^0-9])(\d{2})(\d{2})(?:[^0-9]|$)/)
+  if (roomMatch) return `${Number(roomMatch[1])}F`
+  return '未标注'
+}
+
+function compareFloorNames(a, b) {
+  if (a === '未标注') return 1
+  if (b === '未标注') return -1
+  const aNumber = Number(String(a).match(/\d+/)?.[0] || Number.MAX_SAFE_INTEGER)
+  const bNumber = Number(String(b).match(/\d+/)?.[0] || Number.MAX_SAFE_INTEGER)
+  return aNumber - bNumber || String(a).localeCompare(String(b), 'zh-CN')
+}
+
+function checklistIssueLabel(item) {
+  const text = findingSearchText(item)
+  if (/不亮|熄灭|无法点亮/i.test(text)) return '灯具不亮'
+  if (/闪烁|频闪|忽明忽暗/i.test(text)) return '灯具闪烁'
+  if (/不受控|无法控制|控制失效/i.test(text)) return '不受控'
+  if (/离线|掉线/i.test(text)) return '设备离线'
+  if (/通讯|通信/i.test(text)) return '通讯异常'
+  if (/网关/i.test(text)) return '网关异常'
+  if (/驱动|故障|损坏/i.test(text)) return '设备故障'
+  if (/云端|平台|远程/i.test(text)) return '云端异常'
+  return inferCheckCategory(item).replace('状态异常', '异常').replace('控制异常', '异常').slice(0, 8)
+}
+
+function checklistCustomerImpact(categoryKey) {
   return {
-    灯具状态: '灯具是否有不亮、闪烁或异常状态',
-    控制状态: '开关、时控、场景是否按要求运行',
-    网关状态: '网关是否在线且状态正常',
-    设备通讯: 'CU/设备通讯是否正常',
-    能耗数据: '能耗数据是否按时上传'
-  }[category] || '现场巡检问题'
+    lighting: '影响区域照明效果、照度体验或正常使用。',
+    panel: '客户可能无法通过现场面板正常开关或切换场景。',
+    gateway: '影响设备在线监测、集中控制及故障定位效率。',
+    device: '可能导致局部设备失控、通讯中断或运行不稳定。',
+    cloud: '影响远程控制、状态查看或能耗数据统计。'
+  }[categoryKey] || '可能影响现场照明系统的正常使用。'
 }
 
-function splitOwners(value) {
-  const owners = String(value || '未分配')
-    .split(/[、/,，\s]+/)
-    .map(item => item.trim())
-    .filter(Boolean)
-  return owners.length ? owners : ['未分配']
+function checklistDefaultSolution(categoryKey) {
+  return {
+    lighting: '现场复核灯具、电源与回路状态，确认故障点后维修或更换。',
+    panel: '检查面板供电、地址与控制关系，重新配置并完成现场复测。',
+    gateway: '检查网关供电、网络和配置，必要时重启、重配或更换设备。',
+    device: '排查接线、通讯链路及设备状态，修复连接或更换异常部件。',
+    cloud: '核对云端配置、设备映射和网络状态，修正后验证远程控制及数据上报。'
+  }[categoryKey] || '安排现场复核并根据检查结果完成修复。'
 }
 
-function routeNameForAssignment(item) {
-  const text = [item.floorName, item.taskItem, item.notes].filter(Boolean).join(' ')
-  if (/办公|办公室|会议|前台|大厅|培训/i.test(text)) return '办公区巡检路线'
-  if (/机房|弱电|网关|GW|CU|服务器|路由/i.test(text)) return '设备通讯巡检路线'
-  if (/车间|厂房|生产|仓库/i.test(text)) return '生产/仓储巡检路线'
-  if (/报价|备品|备件|准备|工具|图纸/i.test(text)) return '运维准备路线'
-  if (item.floorName) return `${item.floorName} 楼层巡检路线`
-  return '综合巡检路线'
+function findingSearchText(item) {
+  return [item?.floorName, item?.areaName, item?.issueDescription, item?.handlingResult, item?.causeAnalysis, item?.followUpAction].filter(Boolean).join(' ')
 }
 
-function toScheduleBlock(item, index) {
+function toScheduleItem(item, index) {
   const date = normalizedAssignmentDate(item, index)
-  const startMinutes = date.getHours() * 60 + date.getMinutes()
-  const boardStart = 8 * 60
-  const boardEnd = 18 * 60
   const duration = 60
-  const left = Math.max(0, Math.min(100, ((startMinutes - boardStart) / (boardEnd - boardStart)) * 100))
-  const width = Math.max(8, Math.min(24, (duration / (boardEnd - boardStart)) * 100))
   return {
     id: item.id,
     raw: item,
-    title: `${item.floorName ? `${item.floorName} ` : ''}${item.taskItem || '运维安排'}${item.ownerName ? ` / ${item.ownerName}` : ''}`,
+    startMinutes: date.getHours() * 60 + date.getMinutes(),
+    floorText: item.floorName || '未标注楼层',
+    title: item.taskItem || '巡检安排',
     timeText: `${timeText(date)} - ${timeText(new Date(date.getTime() + duration * 60000))}`,
-    left,
-    width,
     tone: `tone-${(index % 5) + 1}`
   }
+}
+
+function syncScheduleDate(assignments) {
+  const counts = new Map()
+  assignments.forEach(item => {
+    const key = dateKey(item.scheduledAt)
+    if (key) counts.set(key, (counts.get(key) || 0) + 1)
+  })
+  if (!counts.size) {
+    scheduleDate.value = ''
+    return
+  }
+  if (counts.has(scheduleDate.value)) return
+  scheduleDate.value = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
 }
 
 function parseDate(value) {
@@ -1617,40 +1898,369 @@ onMounted(async () => {
   font-weight: 800;
 }
 
-.route-summary-grid {
+.checklist-page {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.checklist-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+
+.checklist-section-head > div:first-child {
+  display: flex;
+  align-items: flex-start;
   gap: 12px;
-}
-
-.route-summary-grid article {
-  display: grid;
-  gap: 6px;
   min-width: 0;
-  padding: 14px;
-  border: 1px solid #e2eaf6;
-  border-radius: 8px;
-  background: #f8fbff;
 }
 
-.route-summary-grid strong {
-  color: var(--ops-text);
-}
-
-.route-summary-grid span {
-  color: var(--primary);
+.section-index {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: #eaf2ff;
+  color: #1769d2;
   font-size: 12px;
   font-weight: 800;
 }
 
-.route-summary-grid p {
-  margin: 0;
+.checklist-head-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.checklist-head-meta > div {
+  display: grid;
+  gap: 4px;
+  padding: 9px 12px;
+  border: 1px solid #e1e9f4;
+  border-radius: 6px;
+  background: #f8fbff;
+}
+
+.checklist-head-meta span {
   color: var(--ops-muted);
-  line-height: 1.6;
-  display: -webkit-box;
+  font-size: 11px;
+}
+
+.checklist-head-meta strong {
+  color: var(--ops-text);
+  font-size: 15px;
+}
+
+.checklist-legend {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 12px;
+  color: #52647e;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.checklist-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.checklist-legend em {
+  margin-left: auto;
+  color: #8390a3;
+  font-style: normal;
+}
+
+.legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.legend-dot.normal { background: #20a464; }
+.legend-dot.resolved { background: #3478d4; }
+.legend-dot.open { background: #dc4c55; }
+
+.checklist-matrix-scroll {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid #dce5f1;
+  border-radius: 6px;
+}
+
+.checklist-matrix {
+  width: max-content;
+  min-width: 100%;
+  border-spacing: 0;
+  border-collapse: separate;
+  color: #243650;
+  font-size: 12px;
+}
+
+.checklist-matrix th,
+.checklist-matrix td {
+  height: 46px;
+  padding: 7px 8px;
+  border-right: 1px solid #e3eaf4;
+  border-bottom: 1px solid #e3eaf4;
+  background: #fff;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.checklist-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  min-width: 106px;
+  background: #eef4fb;
+  color: #263955;
+  font-weight: 800;
+}
+
+.checklist-matrix tr:last-child > * {
+  border-bottom: 0;
+}
+
+.checklist-matrix tr > *:last-child {
+  border-right: 0;
+}
+
+.matrix-category-column,
+.matrix-category-cell {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 150px;
+  min-width: 150px !important;
+}
+
+.matrix-item-column,
+.matrix-item-cell {
+  position: sticky;
+  left: 150px;
+  z-index: 3;
+  width: 220px;
+  min-width: 220px !important;
+}
+
+.checklist-matrix thead .matrix-category-column,
+.checklist-matrix thead .matrix-item-column {
+  z-index: 6;
+}
+
+.matrix-category-cell {
+  background: #f7faff !important;
+}
+
+.matrix-category-cell span,
+.matrix-category-cell strong {
+  display: block;
+}
+
+.matrix-category-cell span {
+  margin-bottom: 5px;
+  color: #8390a3;
+  font-size: 10px;
+}
+
+.matrix-category-cell strong {
+  color: #1d3354;
+  line-height: 1.45;
+}
+
+.matrix-item-cell {
+  background: #fbfdff !important;
+  text-align: left !important;
+  color: #42536c;
+  font-weight: 700;
+}
+
+.matrix-status-cell {
+  min-width: 106px;
+}
+
+.matrix-normal-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: #e9f8f0;
+  color: #178d55;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.matrix-issue-tag {
+  width: 92px;
+  min-height: 28px;
+  padding: 5px 7px;
+  border: 1px solid;
+  border-radius: 5px;
   overflow: hidden;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.matrix-issue-tag.is-open {
+  border-color: #ef9ca1;
+  background: #fff0f1;
+  color: #bd313c;
+}
+
+.matrix-issue-tag.is-resolved {
+  border-color: #9bbce8;
+  background: #eef5ff;
+  color: #245fae;
+}
+
+.checklist-report-summary {
+  padding: 14px 16px;
+  border: 1px solid #e1e9f4;
+  border-radius: 6px;
+  background: #fbfdff;
+}
+
+.checklist-report-summary > p {
+  margin: 0;
+  color: #40516a;
+  line-height: 1.8;
+}
+
+.condensed-category-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid #e5ebf3;
+  list-style: none;
+  counter-reset: category-summary;
+}
+
+.condensed-category-list li {
+  display: grid;
+  grid-template-columns: 5px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  counter-increment: category-summary;
+}
+
+.condensed-category-list li > span {
+  border-radius: 3px;
+  background: #7589a6;
+}
+
+.condensed-category-list li > span.tone-lighting { background: #e0a32f; }
+.condensed-category-list li > span.tone-panel { background: #d16068; }
+.condensed-category-list li > span.tone-gateway { background: #3478d4; }
+.condensed-category-list li > span.tone-device { background: #2a9a83; }
+.condensed-category-list li > span.tone-cloud { background: #7c68c5; }
+
+.condensed-category-list p {
+  margin: 0;
+  color: #53647c;
+  line-height: 1.7;
+}
+
+.condensed-category-list p::before {
+  content: counter(category-summary) '. ';
+  color: #8390a3;
+  font-weight: 700;
+}
+
+.condensed-category-list strong {
+  color: #243c59;
+}
+
+.concise-solution-summary {
+  display: grid;
+  gap: 0;
+  border: 1px solid #e1e9f4;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.concise-solution-summary > section {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 11px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e6ecf4;
+}
+
+.concise-solution-summary > section:last-child {
+  border-bottom: 0;
+}
+
+.solution-number {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  background: #e7f6ee;
+  color: #14824d;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.solution-number.pending {
+  background: #fff0f1;
+  color: #bd313c;
+}
+
+.concise-solution-summary h4 {
+  margin: 2px 0 7px;
+  color: #213a57;
+  font-size: 14px;
+}
+
+.concise-solution-summary section > div > p,
+.pending-category-summary-list p {
+  margin: 0;
+  color: #53647c;
+  line-height: 1.75;
+}
+
+.pending-category-summary-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pending-category-summary-list li {
+  padding-bottom: 11px;
+  border-bottom: 1px dashed #dfe7f1;
+}
+
+.pending-category-summary-list li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.pending-category-summary-list strong {
+  display: block;
+  margin-bottom: 5px;
+  color: #263f5d;
+}
+
+.pending-category-summary-list p span {
+  color: #738199;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .dialog-grid {
@@ -1928,6 +2538,15 @@ onMounted(async () => {
   margin-top: 18px;
 }
 
+.personnel-report-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  color: var(--ops-muted);
+}
+
 .schedule-board {
   overflow-x: auto;
   border: 1px solid #e3ebf5;
@@ -1937,67 +2556,93 @@ onMounted(async () => {
 
 .schedule-grid {
   display: grid;
-  grid-template-columns: 128px minmax(900px, 1fr);
-  min-width: 1040px;
+  grid-template-columns: 140px minmax(1100px, 1fr);
+  min-width: 1240px;
 }
 
 .schedule-corner,
-.schedule-person {
+.schedule-route-label {
+  display: flex;
+  align-items: center;
   padding: 12px 14px;
   border-right: 1px solid #e3ebf5;
-  border-bottom: 1px solid #e3ebf5;
   background: #f8fbff;
   color: #263955;
   font-weight: 800;
 }
 
-.schedule-hours {
+.schedule-route-label {
+  min-height: 104px;
+  border-top: 1px solid #e3ebf5;
+  line-height: 1.5;
+}
+
+.schedule-hours,
+.schedule-hour-cells {
   display: grid;
-  grid-template-columns: repeat(11, 1fr);
-  border-bottom: 1px solid #e3ebf5;
+  grid-template-columns: repeat(11, minmax(100px, 1fr));
+}
+
+.schedule-hours {
   background: #f8fbff;
 }
 
 .schedule-hours span {
-  padding: 10px 0;
+  padding: 11px 0;
+  border-left: 1px solid #e9eff7;
   text-align: center;
   color: #738199;
   font-size: 12px;
-  border-left: 1px solid #e9eff7;
 }
 
-.schedule-track {
-  position: relative;
-  min-height: 46px;
-  border-bottom: 1px solid #edf2f8;
-  background:
-    repeating-linear-gradient(to right, transparent 0, transparent calc(10% - 1px), #edf2f8 calc(10% - 1px), #edf2f8 10%);
+.schedule-hour-cells {
+  min-height: 104px;
+  border-top: 1px solid #e3ebf5;
+  background: #fbfdff;
 }
 
-.schedule-block {
-  position: absolute;
-  top: 7px;
-  min-width: 96px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
+.schedule-hour-cell {
+  min-width: 0;
+  padding: 9px 6px;
+  border-left: 1px solid #edf2f8;
+}
+
+.schedule-route-item {
+  width: 100%;
+  min-width: 0;
+  height: 84px;
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  padding: 8px;
   border-radius: 6px;
   border: 1px solid;
+  text-align: left;
   font-size: 12px;
   cursor: pointer;
   overflow: hidden;
 }
 
-.schedule-block strong {
+.schedule-route-item span {
+  color: #5f6f86;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.schedule-block span {
-  color: #6b7484;
+.schedule-route-item strong {
+  color: var(--ops-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-route-item em {
+  color: #43536d;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -2038,10 +2683,6 @@ onMounted(async () => {
 
 .floor-chip-list span {
   color: var(--ops-muted);
-}
-
-.inline-floor-list {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .finding-workspace {
@@ -2262,8 +2903,6 @@ onMounted(async () => {
   .report-grid,
   .visit-hero,
   .drawer-metrics,
-  .route-summary-grid,
-  .inline-floor-list,
   .overview-layout,
   .report-layout,
   .quote-layout,
@@ -2280,6 +2919,7 @@ onMounted(async () => {
   .template-finding-workspace {
     grid-template-columns: 1fr;
   }
+
 }
 
 @media (max-width: 720px) {
@@ -2290,8 +2930,6 @@ onMounted(async () => {
   .visit-hero,
   .visit-hero-stats,
   .drawer-metrics,
-  .route-summary-grid,
-  .inline-floor-list,
   .ops-kpi-grid,
   .step-grid,
   .compare-grid,
@@ -2314,11 +2952,34 @@ onMounted(async () => {
   .toolbar-actions,
   .tab-toolbar,
   .panel-head,
+  .checklist-section-head,
   .issue-focus-card,
   .finding-card-head,
   .finding-meta {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .checklist-head-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .checklist-legend em {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .matrix-category-column,
+  .matrix-category-cell {
+    width: 108px;
+    min-width: 108px !important;
+  }
+
+  .matrix-item-column,
+  .matrix-item-cell {
+    left: 108px;
+    width: 164px;
+    min-width: 164px !important;
   }
 
   .wide-search,
